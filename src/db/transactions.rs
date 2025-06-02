@@ -95,8 +95,14 @@ pub async fn clear_transactions(tx_col: &Collection<Document>) -> Result<u64, Bo
             Ok(result.deleted_count)
         },
         Err(e) => {
-            error!("清除交易集合失败: {}", e);
-            Err(create_error(&format!("清除交易集合失败: {}", e)))
+            // 检查是否是命名空间不存在的错误（错误码26）
+            if e.to_string().contains("NamespaceNotFound") || e.to_string().contains("ns not found") {
+                info!("交易集合不存在，跳过清除操作（新数据库）");
+                Ok(0)
+            } else {
+                error!("清除交易集合失败: {}", e);
+                Err(create_error(&format!("清除交易集合失败: {}", e)))
+            }
         }
     }
 }
@@ -137,4 +143,27 @@ pub async fn get_transactions_by_index_range(
     }
 
     Ok(result)
+}
+
+/// 删除指定索引范围的交易
+pub async fn delete_transactions_above_index(
+    tx_col: &Collection<Document>,
+    min_index: u64,
+) -> Result<u64, Box<dyn Error>> {
+    let filter = doc! {
+        "index": {
+            "$gt": min_index as i64
+        }
+    };
+    
+    match tx_col.delete_many(filter, None).await {
+        Ok(result) => {
+            info!("已删除 {} 条索引大于 {} 的交易记录", result.deleted_count, min_index);
+            Ok(result.deleted_count)
+        },
+        Err(e) => {
+            error!("删除索引大于 {} 的交易失败: {}", min_index, e);
+            Err(create_error(&format!("删除索引大于 {} 的交易失败: {}", min_index, e)))
+        }
+    }
 }

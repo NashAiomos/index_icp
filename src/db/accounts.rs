@@ -67,8 +67,14 @@ pub async fn clear_accounts(accounts_col: &Collection<Document>) -> Result<u64, 
             Ok(result.deleted_count)
         },
         Err(e) => {
-            error!("清除账户集合失败: {}", e);
-            Err(create_error(&format!("清除账户集合失败: {}", e)))
+            // 检查是否是命名空间不存在的错误（错误码26）
+            if e.to_string().contains("NamespaceNotFound") || e.to_string().contains("ns not found") {
+                info!("账户集合不存在，跳过清除操作（新数据库）");
+                Ok(0)
+            } else {
+                error!("清除账户集合失败: {}", e);
+                Err(create_error(&format!("清除账户集合失败: {}", e)))
+            }
         }
     }
 }

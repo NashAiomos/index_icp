@@ -83,7 +83,9 @@ pub async fn reset_and_sync_all_transactions(
         &collections.balances_col,
         &collections.total_supply_col,
         token_decimals,
-        false // 不计算余额，只保存交易
+        false, // 不计算余额，只保存交易
+        &db_conn.sync_status_col, // 新增同步状态集合
+        token_symbol, // 新增代币符号
     ).await?;
     
     // 同步ledger的交易

@@ -29,6 +29,7 @@ use crate::db::accounts::save_account_transaction;
 use crate::utils::group_transactions_by_account;
 use crate::models::{ArchiveInfo, Transaction, ARCHIVE_BATCH_SIZE};
 use log::{info, debug, error, warn};
+use crate::db::sync_status::{update_sync_status_with_force};
 
 /// 同步归档canister的交易数据
 pub async fn sync_archive_transactions(
@@ -40,6 +41,8 @@ pub async fn sync_archive_transactions(
     _supply_col: &Collection<Document>,
     _token_decimals: u8,
     calculate_balance: bool,
+    sync_status_col: &Collection<Document>,
+    token_symbol: &str,
 ) -> Result<Vec<Transaction>, Box<dyn Error>> {
     info!("获取归档信息...");
     
@@ -71,6 +74,12 @@ pub async fn sync_archive_transactions(
     // 返回值，收集所有同步到的交易
     let mut all_transactions: Vec<Transaction> = Vec::new();
     let mut archive_count = 1;
+    
+    // 跟踪同步状态更新
+    let mut total_synced_count = 0;
+    let status_update_frequency = 2000; // 每2000笔交易更新一次同步状态
+    let mut latest_tx_index = 0u64;
+    let mut latest_tx_timestamp = 0u64;
     
     for archive in &archives {
         let start = archive.block_range_start.0.to_u64().unwrap_or(0);
@@ -123,9 +132,18 @@ pub async fn sync_archive_transactions(
                         let mut fail = 0;
                         
                         for tx in &transactions {
+                            // 更新最新交易索引和时间戳
+                            if let Some(index) = tx.index {
+                                if index > latest_tx_index {
+                                    latest_tx_index = index;
+                                    latest_tx_timestamp = tx.timestamp;
+                                }
+                            }
+                            
                             match save_transaction(tx_col, tx).await {
                                 Ok(_) => {
                                     success += 1;
+                                    total_synced_count += 1;
                                     
                                     // 更新账户-交易关系
                                     if let Some(index) = tx.index {
@@ -137,6 +155,22 @@ pub async fn sync_archive_transactions(
                                                 debug!("保存账户-交易关系失败 (账户: {}, 交易索引: {}): {}", 
                                                     account, index, e);
                                             }
+                                        }
+                                    }
+                                    
+                                    // 每2000笔交易更新一次同步状态
+                                    if total_synced_count % status_update_frequency == 0 {
+                                        if let Err(e) = update_sync_status_with_force(
+                                            sync_status_col, 
+                                            token_symbol, 
+                                            latest_tx_index, 
+                                            latest_tx_timestamp, 
+                                            "incremental", 
+                                            true
+                                        ).await {
+                                            warn!("归档同步中更新同步状态失败: {}", e);
+                                        } else {
+                                            info!("归档同步已更新同步状态: 已处理 {} 笔交易，当前索引 {}", total_synced_count, latest_tx_index);
                                         }
                                     }
                                 },
@@ -175,6 +209,22 @@ pub async fn sync_archive_transactions(
                     }
                 }
             }
+        }
+    }
+    
+    // 归档同步完成后，确保同步状态是最新的
+    if latest_tx_index > 0 {
+        if let Err(e) = update_sync_status_with_force(
+            sync_status_col, 
+            token_symbol, 
+            latest_tx_index, 
+            latest_tx_timestamp, 
+            "incremental", 
+            false
+        ).await {
+            warn!("归档同步完成后更新同步状态失败: {}", e);
+        } else {
+            info!("归档同步完成，最终同步状态已更新至索引: {}", latest_tx_index);
         }
     }
     
