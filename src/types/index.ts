@@ -1,4 +1,11 @@
-// 代币类型定义
+// API 响应格式
+export interface ApiResponse<T> {
+  code: number;
+  data: T | null;
+  error: string | null;
+}
+
+// 代币信息
 export interface Token {
   symbol: string;
   name: string;
@@ -6,54 +13,118 @@ export interface Token {
   canister_id: string;
 }
 
-// 代币统计信息类型
-export interface TokenStats {
-  transactionVolume: string;
-  transactions24h: string;
-  totalAddresses: string;
-}
-
-// 交易类型定义
+// 交易信息
 export interface Transaction {
-  hash: string;
-  time: string;
-  from: string;
-  to: string;
-  value: string;
-  token: string;
-}
-
-// VUSD交易详情类型定义
-export interface VUSDTransaction {
-  _id: {
+  _id?: {
     $oid: string;
   };
   index: number;
   kind: string;
   timestamp: number;
+  // Transfer 类型的交易
   transfer?: {
-    to: {
-      owner: string;
-      subaccount: string | null;
-    };
-    fee: any[];
     from: {
       owner: string;
-      subaccount: string | null;
+      subaccount?: string | null;
     };
-    memo: string | null;
-    created_at_time: string | null;
-    amount: number[];
-    spender: string | null;
-  };
-  approve?: any;
-  burn?: any;
-  mint?: any;
+    to: {
+      owner: string;
+      subaccount?: string | null;
+    };
+    amount: string[];
+    fee?: string[];
+    memo?: string | null;
+    created_at_time?: number | null;
+    spender?: {
+      owner: string;
+      subaccount?: string | null;
+    } | null;
+  } | null;
+  // Burn 类型的交易
+  burn?: {
+    from: {
+      owner: string;
+      subaccount?: string | null;
+    };
+    amount: string[];
+    memo?: string | null;
+    created_at_time?: number | null;
+    spender?: {
+      owner: string;
+      subaccount?: string | null;
+    };
+  } | null;
+  // Approve 类型的交易
+  approve?: {
+    from: {
+      owner: string;
+      subaccount?: string | null;
+    };
+    spender: {
+      owner: string;
+      subaccount?: string | null;
+    };
+    amount: string[];
+    fee?: string[];
+    memo?: string | null;
+    created_at_time?: number | null;
+    expected_allowance?: string[] | null;
+    expires_at?: number | null;
+  } | null;
+  // Mint 类型的交易
+  mint?: {
+    to: {
+      owner: string;
+      subaccount?: string | null;
+    };
+    amount: string[];
+    memo?: string | null;
+    created_at_time?: number | null;
+  } | null;
+  // 为了向后兼容，保留这些字段但标记为可选
+  from?: {
+    owner: string;
+    subaccount?: string | null;
+  } | string;
+  to?: {
+    owner: string;
+    subaccount?: string | null;
+  } | string;
+  amount?: string;
+  fee?: string;
+  memo?: string;
+  created_at_time?: number;
+  spender?: {
+    owner: string;
+    subaccount?: string | null;
+  } | string;
+  token?: string;
+  token_name?: string;
+  datetime?: string;
 }
 
-// API响应类型
-export interface ApiResponse<T> {
-  code: number;
-  data: T;
-  error: string | null;
+// 账户余额信息
+export interface AccountBalance {
+  account: string;
+  balance: string;
+  token: string;
+  token_name: string;
+  decimals: number;
+}
+
+// 交易范围查询结果
+export interface TransactionRange {
+  start: number;
+  end: number;
+  count: number;
+  transactions: Transaction[];
+}
+
+// 代币统计信息（用于首页展示）
+export interface TokenStats {
+  symbol: string;
+  name: string;
+  transactionVolume: string;
+  transactions24h: number;
+  totalAddresses: number;
 } 

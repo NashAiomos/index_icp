@@ -1,152 +1,113 @@
 import axios from 'axios';
-import { ApiResponse, Token } from '../types';
+import { ApiResponse, Token, Transaction, AccountBalance, TransactionRange } from '../types';
 
-// 设置API基础URL
-const API_BASE_URL = 'https://index-service.zkid.app/api';
+// API 基础 URL
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://index-service.zkid.app/api';
 
-// 创建axios实例
-const api = axios.create({
-  baseURL: API_BASE_URL
+// 创建 axios 实例
+const apiClient = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 10000,
 });
 
-// 获取所有支持的代币
-export const getTokens = async (): Promise<Token[]> => {
-  try {
-    const response = await api.get<ApiResponse<Token[]>>('/tokens');
-    return response.data.data;
-  } catch (error) {
-    console.error('获取代币列表失败:', error);
-    return [];
-  }
-};
-
-// 获取代币的总供应量
-export const getTotalSupply = async (token?: string): Promise<string> => {
-  const paramToken = token?.toUpperCase();
-  try {
-    const response = await api.get<ApiResponse<string>>('/total_supply', {
-      params: { token: paramToken }
-    });
-    
-    // 处理返回的格式，移除下划线使其适合展示
-    if (response.data.data) {
-      return response.data.data.replace(/_/g, ',');
+// API 服务类
+export class ApiService {
+  // 获取支持的代币列表
+  static async getTokens(): Promise<Token[]> {
+    const response = await apiClient.get<ApiResponse<Token[]>>('/tokens');
+    if (response.data.code === 200 && response.data.data) {
+      return response.data.data;
     }
-    return '0';
-  } catch (error) {
-    console.error(`获取${token || ''}总供应量失败:`, error);
-    throw error;
+    throw new Error(response.data.error || 'Failed to fetch tokens');
   }
-};
 
-// 获取账户余额
-export const getBalance = async (account: string, token?: string) => {
-  try {
-    const response = await api.get(`/balance/${account}`, {
-      params: { token }
-    });
-    return response.data.data;
-  } catch (error) {
-    console.error(`获取账户${account}余额失败:`, error);
-    throw error;
-  }
-};
-
-// 获取最新交易
-export const getLatestTransaction = async (token?: string) => {
-  const paramToken = token?.toUpperCase();
-  try {
-    const response = await api.get('/latest_transactions', {
-      params: { token: paramToken, limit: 1 }
-    });
-    return response.data.data?.[0] || null;
-  } catch (error) {
-    console.error(`获取${token || ''}最新交易失败:`, error);
-    return null;
-  }
-};
-
-// 获取最新交易列表
-export const getLatestTransactions = async (token?: string, limit: number = 20, offset: number = 0) => {
-  const paramToken = token?.toUpperCase();
-  try {
-    const response = await api.get('/latest_transactions', {
-      params: { token: paramToken, limit, offset }
-    });
-    return response.data.data || [];
-  } catch (error) {
-    console.error(`获取${token || ''}最新交易列表失败:`, error);
-    return [];
-  }
-};
-
-// 获取交易总数
-export const getTransactionCount = async (token?: string) => {
-  const paramToken = token?.toUpperCase();
-  try {
-    const response = await api.get('/tx_count', {
-      params: { token: paramToken }
-    });
-    return response.data.data || '0';
-  } catch (error) {
-    console.error(`获取${token || ''}交易总数失败:`, error);
-    throw error;
-  }
-};
-
-// 获取账户总数
-export const getAccountCount = async (token?: string) => {
-  const paramToken = token?.toUpperCase();
-  try {
-    const response = await api.get('/account_count', {
-      params: { token: paramToken }
-    });
-    return response.data.data || '0';
-  } catch (error) {
-    console.error(`获取${token || ''}账户总数失败:`, error);
-    throw error;
-  }
-};
-
-// 搜索交易或账户
-export const search = async (query: string, token?: string) => {
-  // 如果是有效的账户地址格式，查询余额
-  if (query.match(/^[a-zA-Z0-9-]{10,}$/)) {
-    try {
-      const balance = await getBalance(query, token);
-      return { type: 'account', data: balance };
-    } catch (error) {
-      // 如果不是账户，尝试作为交易哈希查询
-      console.error('搜索账户失败，尝试作为交易哈希查询');
+  // 获取代币总供应量
+  static async getTotalSupply(token?: string): Promise<string> {
+    const params = token ? { token } : {};
+    const response = await apiClient.get<ApiResponse<string>>('/total_supply', { params });
+    if (response.data.code === 200 && response.data.data) {
+      return response.data.data;
     }
+    throw new Error(response.data.error || 'Failed to fetch total supply');
   }
-  
-  // 如果是有效的交易哈希格式，查询交易
-  if (query.match(/^0x[a-fA-F0-9]{64}$/)) {
-    try {
-      const response = await api.get(`/transaction/${query}`, {
-        params: { token }
-      });
-      return { type: 'transaction', data: response.data.data };
-    } catch (error) {
-      console.error('搜索交易失败:', error);
-      return { type: 'error', message: '未找到结果' };
-    }
-  }
-  
-  return { type: 'error', message: '搜索格式无效' };
-};
 
-// 按范围获取交易
-export const getTransactionsByRange = async (start: number, end: number, token?: string) => {
-  const paramToken = token?.toUpperCase();
-  try {
-    const response = await api.get(`/transactions_by_range/${start}/${end}`, {
-      params: { token: paramToken }
-    });
-    return response.data.data || { transactions: [] };
-  } catch (error) {
-    console.error(`获取${token || ''}交易范围数据失败:`, error);
-    return { transactions: [] };
+  // 获取账户余额
+  static async getBalance(account: string, token?: string): Promise<AccountBalance> {
+    const params = token ? { token } : {};
+    const response = await apiClient.get<ApiResponse<AccountBalance>>(`/balance/${account}`, { params });
+    if (response.data.code === 200 && response.data.data) {
+      return response.data.data;
+    }
+    throw new Error(response.data.error || 'Failed to fetch balance');
   }
-}; 
+
+  // 获取指定索引交易的完整详情
+  static async getTransaction(index: number, token?: string): Promise<Transaction> {
+    const params = token ? { token } : {};
+    const response = await apiClient.get<ApiResponse<Transaction>>(`/transaction/${index}`, { params });
+    if (response.data.code === 200 && response.data.data) {
+      return response.data.data;
+    }
+    throw new Error(response.data.error || 'Failed to fetch transaction');
+  }
+
+  // 获取最新交易
+  static async getLatestTransactions(limit: number = 20, token?: string): Promise<Transaction[]> {
+    const params = { limit, ...(token && { token }) };
+    const response = await apiClient.get<ApiResponse<Transaction[]>>('/latest_transactions', { params });
+    if (response.data.code === 200 && response.data.data) {
+      return response.data.data;
+    }
+    throw new Error(response.data.error || 'Failed to fetch latest transactions');
+  }
+
+  // 获取账户数量
+  static async getAccountCount(token?: string): Promise<number> {
+    const params = token ? { token } : {};
+    const response = await apiClient.get<ApiResponse<number>>('/account_count', { params });
+    if (response.data.code === 200 && response.data.data !== null) {
+      return response.data.data;
+    }
+    throw new Error(response.data.error || 'Failed to fetch account count');
+  }
+
+  // 获取交易数量
+  static async getTxCount(token?: string): Promise<number> {
+    const params = token ? { token } : {};
+    const response = await apiClient.get<ApiResponse<number>>('/tx_count', { params });
+    if (response.data.code === 200 && response.data.data !== null) {
+      return response.data.data;
+    }
+    throw new Error(response.data.error || 'Failed to fetch transaction count');
+  }
+
+  // 获取指定范围的交易
+  static async getTransactionsByRange(start: number, end: number, limit: number = 300, token?: string): Promise<TransactionRange> {
+    const params = { limit, ...(token && { token }) };
+    const response = await apiClient.get<ApiResponse<TransactionRange>>(`/transactions_by_range/${start}/${end}`, { params });
+    if (response.data.code === 200 && response.data.data) {
+      return response.data.data;
+    }
+    throw new Error(response.data.error || 'Failed to fetch transactions by range');
+  }
+
+  // 搜索交易
+  static async searchTransactions(query: any, limit: number = 50, skip: number = 0, token?: string): Promise<Transaction[]> {
+    const params = { limit, skip, ...(token && { token }) };
+    const response = await apiClient.post<ApiResponse<Transaction[]>>('/search', query, { params });
+    if (response.data.code === 200 && response.data.data) {
+      return response.data.data;
+    }
+    throw new Error(response.data.error || 'Failed to search transactions');
+  }
+
+  // 获取账户的交易列表
+  static async getAccountTransactions(account: string, token?: string): Promise<{ transactions: Transaction[] }> {
+    const params = token ? { token } : {};
+    const response = await apiClient.get<ApiResponse<{ transactions: Transaction[] }>>(`/transactions/${account}`, { params });
+    if (response.data.code === 200 && response.data.data) {
+      return response.data.data;
+    }
+    throw new Error(response.data.error || 'Failed to fetch account transactions');
+  }
+} 

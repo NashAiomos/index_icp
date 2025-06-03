@@ -1,52 +1,49 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { FiSearch } from 'react-icons/fi';
 
-const Header: React.FC = () => {
+interface HeaderProps {
+  onSearch?: (query: string) => void;
+  isDark?: boolean;
+}
+
+const Header: React.FC<HeaderProps> = ({ onSearch, isDark }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const navigate = useNavigate();
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (searchQuery.trim()) {
-      navigate(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
+    if (onSearch && searchQuery.trim()) {
+      onSearch(searchQuery.trim());
     }
   };
 
   return (
-    <header className="bg-white shadow-sm">
-      <div className="container mx-auto px-4 py-4">
-        <div className="flex flex-col md:flex-row justify-between items-center">
-          <h1
-            className="text-2xl font-bold text-gray-800 mb-4 md:mb-0 cursor-pointer"
-            onClick={() => navigate('/')}
-          >
-            Vly Explorer
-          </h1>
-          
-          <form onSubmit={handleSearch} className="w-full md:w-3/5">
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                <svg className="w-4 h-4 text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20">
-                  <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m19 19-4-4m0-7A7 7 0 1 1 1 8a7 7 0 0 1 14 0Z" />
-                </svg>
+    <header className={`${isDark ? 'bg-dark-bg border-dark-border' : 'bg-white border-gray-200'} border-b`}>
+      <div className="container mx-auto px-4">
+        <div className="flex items-center justify-between">
+
+          {/* Logo */}
+          <div className="flex items-center">
+            <img src="/logo.svg" alt="Vly Explorer" style={{ height: '5rem' }} className="w-auto" />
+          </div>
+
+            {/* Search Bar */}
+            <form onSubmit={handleSearch} className="max-w-xl w-full md:w-96">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search"
+                  className={`w-full ${isDark
+                      ? 'bg-dark-card border-dark-border text-white placeholder-gray-500'
+                      : 'bg-gray-50 border-gray-300 text-gray-900 placeholder-gray-400'
+                    } border rounded-lg py-2.5 px-4 pl-10 focus:outline-none focus:border-primary-blue transition-colors`}
+                />
+                <FiSearch className={`absolute left-3 top-1/2 transform -translate-y-1/2 ${isDark ? 'text-gray-500' : 'text-gray-400'
+                  } text-lg`} />
               </div>
-              <input
-                type="search"
-                id="search"
-                className="block w-full p-3 pl-10 text-sm text-gray-900 border border-gray-200 rounded-lg bg-gray-50 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Search by Address / TxN Hash"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                required
-              />
-              <button
-                type="submit"
-                className="absolute right-2 bottom-2 top-2 bg-blue-600 hover:bg-blue-700 text-white px-4 rounded-md"
-              >
-                Search
-              </button>
-            </div>
-          </form>
+            </form>
+
         </div>
       </div>
     </header>
