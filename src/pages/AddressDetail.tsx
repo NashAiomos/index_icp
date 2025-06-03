@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ApiService } from '../services/api';
-import { AccountBalance, Transaction } from '../types';
+import { AccountBalance } from '../types';
 import { useTheme } from '../hooks/useTheme';
 import { formatAddress, formatNumber } from '../utils/format';
 import Header from '../components/Header';
 
 interface AddressStats {
-  transactionVolume: number;
+  totalTransactionCount: number;
   firstTransactionTime: number | null;
   lastTransactionTime: number | null;
   transactionCount: number;
@@ -18,12 +18,13 @@ const AddressDetail: React.FC = () => {
   const [likeBalance, setLikeBalance] = useState<AccountBalance | null>(null);
   const [vusdBalance, setVusdBalance] = useState<AccountBalance | null>(null);
   const [addressStats, setAddressStats] = useState<AddressStats>({
-    transactionVolume: 0,
+    totalTransactionCount: 0,
     firstTransactionTime: null,
     lastTransactionTime: null,
     transactionCount: 0
   });
   const [loading, setLoading] = useState(true);
+  const [statsLoading, setStatsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const isDark = useTheme();
 
@@ -33,6 +34,7 @@ const AddressDetail: React.FC = () => {
     const fetchAddressData = async () => {
       try {
         setLoading(true);
+        setStatsLoading(true);
         setError(null);
 
         // 并行获取LIKE和VUSD余额以及交易数据
@@ -45,6 +47,7 @@ const AddressDetail: React.FC = () => {
 
         setLikeBalance(likeBalanceData);
         setVusdBalance(vusdBalanceData);
+        setLoading(false);
 
         // 合并所有交易并计算统计数据
         const allTransactions = [...likeTransactions.transactions, ...vusdTransactions.transactions];
@@ -53,38 +56,28 @@ const AddressDetail: React.FC = () => {
           // 按时间戳排序
           allTransactions.sort((a, b) => a.timestamp - b.timestamp);
           
-          // 计算交易量（将所有交易的amount相加）
-          let totalVolume = 0;
-          allTransactions.forEach(tx => {
-            // 根据交易类型获取金额
-            let amount = '0';
-            if (tx.transfer && tx.transfer.amount) {
-              amount = tx.transfer.amount[0] || '0';
-            } else if (tx.burn && tx.burn.amount) {
-              amount = tx.burn.amount[0] || '0';
-            } else if (tx.mint && tx.mint.amount) {
-              amount = tx.mint.amount[0] || '0';
-            } else if (tx.approve && tx.approve.amount) {
-              amount = tx.approve.amount[0] || '0';
-            }
-            
-            // 将金额转换为数字并累加
-            const numAmount = parseFloat(amount) || 0;
-            totalVolume += numAmount;
-          });
-
+          // 计算交易统计信息
           setAddressStats({
-            transactionVolume: totalVolume,
+            totalTransactionCount: allTransactions.length, // 交易总数就是交易数量
             firstTransactionTime: allTransactions[0].timestamp,
             lastTransactionTime: allTransactions[allTransactions.length - 1].timestamp,
             transactionCount: allTransactions.length
           });
+        } else {
+          // 如果没有交易，设置默认值
+          setAddressStats({
+            totalTransactionCount: 0,
+            firstTransactionTime: null,
+            lastTransactionTime: null,
+            transactionCount: 0
+          });
         }
+        setStatsLoading(false);
       } catch (err) {
         console.error('Failed to fetch address data:', err);
         setError('Failed to load address data');
-      } finally {
         setLoading(false);
+        setStatsLoading(false);
       }
     };
 
@@ -132,6 +125,13 @@ const AddressDetail: React.FC = () => {
       return 'Just now';
     }
   };
+
+  // 加载动画组件
+  const LoadingSpinner = () => (
+    <div className="flex items-center justify-center">
+      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-current"></div>
+    </div>
+  );
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-dark-bg' : 'bg-gray-50'}`}>
@@ -204,9 +204,9 @@ const AddressDetail: React.FC = () => {
                       </svg>
                     </div>
                     <div>
-                      <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Transaction Volume</p>
+                      <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Total number of transactions</p>
                       <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                        {formatNumber(addressStats.transactionCount)}
+                        {statsLoading ? <LoadingSpinner /> : formatNumber(addressStats.totalTransactionCount)}
                       </p>
                     </div>
                   </div>
@@ -222,7 +222,7 @@ const AddressDetail: React.FC = () => {
                     <div>
                       <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>First Transaction</p>
                       <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                        {formatTimeDiff(addressStats.firstTransactionTime)}
+                        {statsLoading ? <LoadingSpinner /> : formatTimeDiff(addressStats.firstTransactionTime)}
                       </p>
                     </div>
                   </div>
@@ -238,7 +238,7 @@ const AddressDetail: React.FC = () => {
                     <div>
                       <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Last Transaction</p>
                       <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                        {formatTimeDiff(addressStats.lastTransactionTime)}
+                        {statsLoading ? <LoadingSpinner /> : formatTimeDiff(addressStats.lastTransactionTime)}
                       </p>
                     </div>
                   </div>
@@ -263,7 +263,7 @@ const AddressDetail: React.FC = () => {
                 </h2>
               </div>
               
-              <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* LIKE 余额 */}
                 <div className={`flex items-center justify-between p-4 rounded-lg ${
                   isDark ? 'bg-blue-50/5' : 'bg-blue-50'

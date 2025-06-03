@@ -124,7 +124,7 @@ export interface TransactionRange {
 export interface TokenStats {
   symbol: string;
   name: string;
-  transactionVolume: string;
+  totalTransactionCount: string;
   transactions24h: number;
   totalAddresses: number;
 } 

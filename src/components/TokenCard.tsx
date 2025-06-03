@@ -4,7 +4,7 @@ import { formatNumber } from '../utils/format';
 interface TokenCardProps {
   symbol: string;
   name: string;
-  transactionVolume: string;
+  totalTransactionCount: string;
   transactions24h: number;
   totalAddresses: number;
   color?: 'blue' | 'purple';
@@ -14,7 +14,7 @@ interface TokenCardProps {
 const TokenCard: React.FC<TokenCardProps> = ({
   symbol,
   name,
-  transactionVolume,
+  totalTransactionCount,
   transactions24h,
   totalAddresses,
   color = 'blue',
@@ -44,9 +44,9 @@ const TokenCard: React.FC<TokenCardProps> = ({
       {/* 横向布局的统计数据 */}
       <div className="grid grid-cols-3 gap-4">
         <div>
-          <p className={`text-sm mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Transaction Volume</p>
+          <p className={`text-sm mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Total number of transactions</p>
           <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-            {formatNumber(transactionVolume)}
+            {formatNumber(totalTransactionCount)}
           </p>
         </div>
         <div>

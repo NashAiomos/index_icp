@@ -60,7 +60,7 @@ const HomePage: React.FC = () => {
             
             stats[token.symbol] = {
               name: token.name,
-              transactionVolume: txCount.toString(),
+              totalTransactionCount: txCount.toString(),
               transactions24h: txCount, // 暂时使用总交易数
               totalAddresses: accountCount
             };
@@ -228,7 +228,7 @@ const HomePage: React.FC = () => {
             <TokenCard
               symbol="LIKE"
               name={tokenStats['LIKE'].name}
-              transactionVolume={tokenStats['LIKE'].transactionVolume}
+              totalTransactionCount={tokenStats['LIKE'].totalTransactionCount}
               transactions24h={tokenStats['LIKE'].transactions24h}
               totalAddresses={tokenStats['LIKE'].totalAddresses}
               color="blue"
@@ -241,7 +241,7 @@ const HomePage: React.FC = () => {
             <TokenCard
               symbol="vUSD"
               name={tokenStats['VUSD'].name}
-              transactionVolume={tokenStats['VUSD'].transactionVolume}
+              totalTransactionCount={tokenStats['VUSD'].totalTransactionCount}
               transactions24h={tokenStats['VUSD'].transactions24h}
               totalAddresses={tokenStats['VUSD'].totalAddresses}
               color="purple"
