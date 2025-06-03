@@ -76,6 +76,18 @@ pub async fn update_sync_status(
     last_synced_timestamp: u64,
     sync_mode: &str
 ) -> Result<(), Box<dyn Error>> {
+    update_sync_status_with_force(sync_status_col, token_symbol, last_synced_index, last_synced_timestamp, sync_mode, false).await
+}
+
+/// 更新同步状态（带强制更新选项）
+pub async fn update_sync_status_with_force(
+    sync_status_col: &Collection<Document>,
+    token_symbol: &str,
+    last_synced_index: u64,
+    last_synced_timestamp: u64,
+    sync_mode: &str,
+    force_update: bool
+) -> Result<(), Box<dyn Error>> {
     // 设置重试逻辑
     let max_retries = 3;
     let mut retry_count = 0;
@@ -99,8 +111,13 @@ pub async fn update_sync_status(
             mongodb::options::UpdateOptions::builder().upsert(true).build()
         ).await {
             Ok(_) => {
-                info!("{}: 同步状态已更新: 索引 {}, 时间戳 {}, 模式 {}", 
-                         token_symbol, last_synced_index, last_synced_timestamp, sync_mode);
+                if force_update {
+                    info!("{}: 同步状态已强制更新: 索引 {}, 时间戳 {}, 模式 {}", 
+                             token_symbol, last_synced_index, last_synced_timestamp, sync_mode);
+                } else {
+                    info!("{}: 同步状态已更新: 索引 {}, 时间戳 {}, 模式 {}", 
+                             token_symbol, last_synced_index, last_synced_timestamp, sync_mode);
+                }
                 return Ok(());
             },
             Err(e) => {
@@ -148,8 +165,14 @@ pub async fn clear_token_sync_status(
             Ok(())
         },
         Err(e) => {
-            error!("{}: 清除同步状态记录失败: {}", token_symbol, e);
-            Err(create_error(&format!("{}: 清除同步状态记录失败: {}", token_symbol, e)))
+            // 检查是否是命名空间不存在的错误（错误码26）
+            if e.to_string().contains("NamespaceNotFound") || e.to_string().contains("ns not found") {
+                info!("{}: 同步状态集合不存在，跳过清除操作（新数据库）", token_symbol);
+                Ok(())
+            } else {
+                error!("{}: 清除同步状态记录失败: {}", token_symbol, e);
+                Err(create_error(&format!("{}: 清除同步状态记录失败: {}", token_symbol, e)))
+            }
         }
     }
 }
@@ -164,8 +187,14 @@ pub async fn clear_sync_status(
             Ok(())
         },
         Err(e) => {
-            error!("清除所有同步状态记录失败: {}", e);
-            Err(create_error(&format!("清除所有同步状态记录失败: {}", e)))
+            // 检查是否是命名空间不存在的错误（错误码26）
+            if e.to_string().contains("NamespaceNotFound") || e.to_string().contains("ns not found") {
+                info!("同步状态集合不存在，跳过清除操作（新数据库）");
+                Ok(())
+            } else {
+                error!("清除所有同步状态记录失败: {}", e);
+                Err(create_error(&format!("清除所有同步状态记录失败: {}", e)))
+            }
         }
     }
 }

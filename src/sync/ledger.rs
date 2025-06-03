@@ -27,7 +27,7 @@ use crate::db::transactions::get_latest_transaction_index;
 use crate::blockchain::{get_first_transaction_index, fetch_ledger_transactions};
 use crate::db::transactions::save_transaction;
 use crate::db::accounts::save_account_transaction;
-use crate::db::sync_status::{get_sync_status, set_incremental_mode};
+use crate::db::sync_status::{get_sync_status, set_incremental_mode, update_sync_status_with_force};
 use crate::utils::{group_transactions_by_account};
 use crate::models::{Transaction, BATCH_SIZE};
 
@@ -333,7 +333,7 @@ pub async fn sync_ledger_transactions(
     
     // 记录上次更新同步状态的索引
     let mut last_status_update_index = latest_index;
-    let status_update_frequency: usize = 100;  // 每同步100笔交易更新一次状态
+    let status_update_frequency: usize = 2000;  // 每同步2000笔交易更新一次状态
     
     info!("开始增量同步交易数据，从索引 {} 开始", current_index);
     
@@ -446,11 +446,26 @@ pub async fn sync_ledger_transactions(
                 if latest_tx_index > last_status_update_index && 
                    ((latest_tx_index - last_status_update_index) as usize >= status_update_frequency || 
                     all_new_transactions.len() % status_update_frequency == 0) {
-                    if let Err(e) = set_incremental_mode(sync_status_col, token_symbol, latest_tx_index, latest_tx_timestamp).await {
-                        warn!("更新同步状态失败: {}", e);
+                    
+                    // 判断是否达到2000笔交易的更新频率
+                    let is_batch_update = (latest_tx_index - last_status_update_index) as usize >= status_update_frequency;
+                    
+                    if is_batch_update {
+                        // 每2000笔交易强制更新同步状态
+                        if let Err(e) = update_sync_status_with_force(sync_status_col, token_symbol, latest_tx_index, latest_tx_timestamp, "incremental", true).await {
+                            warn!("强制更新同步状态失败: {}", e);
+                        } else {
+                            info!("已强制更新同步状态索引: {} -> {} (达到{}笔交易更新频率)", last_status_update_index, latest_tx_index, status_update_frequency);
+                            last_status_update_index = latest_tx_index;
+                        }
                     } else {
-                        info!("已更新同步状态索引: {} -> {}", last_status_update_index, latest_tx_index);
-                        last_status_update_index = latest_tx_index;
+                        // 普通更新
+                        if let Err(e) = set_incremental_mode(sync_status_col, token_symbol, latest_tx_index, latest_tx_timestamp).await {
+                            warn!("更新同步状态失败: {}", e);
+                        } else {
+                            info!("已更新同步状态索引: {} -> {}", last_status_update_index, latest_tx_index);
+                            last_status_update_index = latest_tx_index;
+                        }
                     }
                 }
                 

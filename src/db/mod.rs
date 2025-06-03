@@ -164,7 +164,14 @@ pub async fn create_indexes(conn: &DbConnection) -> Result<(), Box<dyn Error>> {
     // 在创建新索引前清除旧的索引，避免重复键错误
     match conn.sync_status_col.drop_indexes(None).await {
         Ok(_) => info!("同步状态集合旧索引已清除"),
-        Err(e) => error!("同步状态集合清除旧索引失败: {}", e)
+        Err(e) => {
+            // 检查是否是命名空间不存在的错误（错误码26）
+            if e.to_string().contains("NamespaceNotFound") || e.to_string().contains("ns not found") {
+                info!("同步状态集合不存在，跳过索引清除（新数据库）");
+            } else {
+                error!("同步状态集合清除旧索引失败: {}", e);
+            }
+        }
     }
     
     match conn.sync_status_col.create_index(

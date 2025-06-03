@@ -54,7 +54,7 @@ use crate::sync::{sync_ledger_transactions, sync_archive_transactions};
 use crate::sync::admin::reset_and_sync_all_transactions;
 use crate::db::balances::calculate_incremental_balances;
 use crate::db::sync_status::{get_sync_status, set_incremental_mode, update_balance_calculated_index};
-use crate::db::transactions::{get_latest_transaction_index, get_transactions_by_index_range};
+use crate::db::transactions::{get_latest_transaction_index, get_transactions_by_index_range, delete_transactions_above_index};
 use chrono;
 
 #[tokio::main]
@@ -391,7 +391,9 @@ async fn run_application(cfg: models::Config) -> Result<(), Box<dyn Error>> {
                 &collections.balances_col,
                 &collections.total_supply_col,
                 _token_decimals,
-                false // 不计算余额
+                false, // 不计算余额
+                &db_conn.sync_status_col, // 新增同步状态集合
+                &token.symbol, // 新增代币符号
             ).await?;
             
             // 同步主账本数据
@@ -474,17 +476,32 @@ async fn run_application(cfg: models::Config) -> Result<(), Box<dyn Error>> {
                             error!("{}: 更新同步状态失败: {}", token.symbol, e);
                         }
                     } else if db_latest_index > status.last_synced_index {
-                        info!("{}: 数据库最新交易索引 ({}) 大于同步状态记录的索引 ({}), 将更新同步状态", 
+                        warn!("{}: 数据库最新交易索引 ({}) 大于同步状态记录的索引 ({}), 检测到数据不一致", 
                               token.symbol, db_latest_index, status.last_synced_index);
                         
-                        // 更新同步状态为数据库的最新索引
-                        if let Err(e) = set_incremental_mode(
-                            &db_conn.sync_status_col,
-                            &token.symbol,
-                            db_latest_index,
-                            status.last_synced_timestamp
-                        ).await {
-                            error!("{}: 更新同步状态失败: {}", token.symbol, e);
+                        info!("{}: 根据用户要求，删除索引大于 {} 的多余交易...", token.symbol, status.last_synced_index);
+                        
+                        // 删除多出来的交易
+                        match delete_transactions_above_index(&collections.tx_col, status.last_synced_index).await {
+                            Ok(deleted_count) => {
+                                info!("{}: 成功删除 {} 条多余的交易记录，现在从索引 {} 继续同步", 
+                                      token.symbol, deleted_count, status.last_synced_index);
+                                
+                                // 确认同步状态不需要更新，因为我们已经按照sync_status的索引清理了数据库
+                                info!("{}: 数据库已与同步状态保持一致，索引: {}", token.symbol, status.last_synced_index);
+                            },
+                            Err(e) => {
+                                error!("{}: 删除多余交易失败: {}", token.symbol, e);
+                                // 如果删除失败，更新同步状态为数据库的最新索引
+                                if let Err(status_err) = set_incremental_mode(
+                                    &db_conn.sync_status_col,
+                                    &token.symbol,
+                                    db_latest_index,
+                                    status.last_synced_timestamp
+                                ).await {
+                                    error!("{}: 更新同步状态失败: {}", token.symbol, status_err);
+                                }
+                            }
                         }
                     } else {
                         info!("{}: 同步状态与数据库记录一致，索引: {}", token.symbol, db_latest_index);
