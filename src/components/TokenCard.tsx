@@ -1,6 +1,8 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatNumber } from '../utils/format';
+import RollingNumber from './RollingNumber';
+import { Token } from '../types';
 
 interface TokenCardProps {
   symbol: string;
@@ -10,6 +12,7 @@ interface TokenCardProps {
   totalAddresses: number;
   color?: 'blue' | 'purple';
   isDark?: boolean;
+  token?: Token;
 }
 
 const TokenCard: React.FC<TokenCardProps> = ({
@@ -19,11 +22,13 @@ const TokenCard: React.FC<TokenCardProps> = ({
   totalSupply,
   totalAddresses,
   color = 'blue',
-  isDark
+  isDark,
+  token
 }) => {
   const navigate = useNavigate();
 
   const handleClick = () => {
+    // 简化导航，不再传递数据
     navigate(`/token/${symbol}`);
   };
 
@@ -64,19 +69,19 @@ const TokenCard: React.FC<TokenCardProps> = ({
         <div>
           <p className={`text-sm mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Total Transactions</p>
           <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-            {formatNumber(totalTransactionCount)}
+            <RollingNumber value={totalTransactionCount} />
           </p>
         </div>
         <div>
           <p className={`text-sm mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Total Supply</p>
           <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-            {formatNumber(totalSupply)}
+            <RollingNumber value={totalSupply} />
           </p>
         </div>
         <div>
           <p className={`text-sm mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Holding Accounts</p>
           <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-            {formatNumber(totalAddresses)}
+            <RollingNumber value={totalAddresses.toString()} />
           </p>
         </div>
       </div>

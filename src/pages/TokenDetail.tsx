@@ -1,29 +1,94 @@
-import React, { useState, useEffect } from 'react';
+/**
+ * Token详情页组件
+ * 
+ * 数据加载逻辑：
+ * 1. 从全局缓存获取代币数据，立即显示
+ * 2. 全局缓存在后台每隔1分钟自动刷新一次
+ * 3. 交易列表每30秒自动刷新一次
+ * 
+ * 优化特性：
+ * - 使用全局缓存确保数据一致性
+ * - 页面切换时无需重新加载数据
+ * - 后台静默更新，不显示更新状态干扰用户
+ */
+
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import TransactionTable from '../components/TransactionTable';
 import BackToTopButton from '../components/BackToTopButton';
+import RollingNumber from '../components/RollingNumber';
 import { ApiService } from '../services/api';
-import { Transaction, Token } from '../types';
+import { Transaction } from '../types';
 import { useTheme } from '../hooks/useTheme';
-import { formatNumber } from '../utils/format';
-
-interface TokenDetailStats {
-  accountCount: number;
-  totalSupply: string;
-  totalTransactions: number;
-}
+import { useAutoRefreshTransactions } from '../hooks/useAutoRefreshTransactions';
+import { useGlobalCache } from '../contexts/GlobalCacheContext';
+import { FiSearch } from 'react-icons/fi';
 
 const TokenDetail: React.FC = () => {
   const { symbol } = useParams<{ symbol: string }>();
   const navigate = useNavigate();
   const isDark = useTheme();
-  const [loading, setLoading] = useState(true);
+  const { getTokenStats, getToken, data: cacheData } = useGlobalCache();
   const [error, setError] = useState<string | null>(null);
-  const [token, setToken] = useState<Token | null>(null);
-  const [stats, setStats] = useState<TokenDetailStats | null>(null);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [tokenList, setTokenList] = useState<Token[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  
+  // 处理symbol映射：vUSD -> VUSD
+  const apiSymbol = symbol === 'vUSD' ? 'VUSD' : symbol || '';
+
+  // 从全局缓存获取数据
+  const tokenStats = getTokenStats(apiSymbol);
+  const token = getToken(apiSymbol);
+
+  // 获取交易的函数
+  const fetchTokenTransactions = useCallback(async () => {
+    if (!apiSymbol) return [];
+    
+    try {
+      const latestTxs = await ApiService.getLatestTransactions(50, apiSymbol);
+      // 添加 _tokenSymbol 属性
+      return latestTxs.map(tx => ({
+        ...tx,
+        _tokenSymbol: apiSymbol
+      }));
+    } catch (err) {
+      console.error('Failed to fetch transactions:', err);
+      // 记录错误但不抛出，避免整个组件崩溃
+      setError(`获取交易记录失败: ${err instanceof Error ? err.message : '未知错误'}`);
+      return [];
+    }
+  }, [apiSymbol]);
+
+  // 使用自动刷新 hook
+  const { 
+    transactions, 
+    setTransactions, 
+    setHeaderRef,
+    clearNewFlags
+  } = useAutoRefreshTransactions({
+    fetchFunction: fetchTokenTransactions,
+    interval: 30000, // 30秒
+    enabled: true
+  });
+
+  // 添加交易加载状态
+  const [transactionsLoading, setTransactionsLoading] = useState(true);
+
+  // 监听交易数据的初始加载
+  useEffect(() => {
+    const loadInitialTransactions = async () => {
+      setTransactionsLoading(true);
+      try {
+        const txs = await fetchTokenTransactions();
+        setTransactions(txs);
+      } finally {
+        setTransactionsLoading(false);
+      }
+    };
+    
+    // 立即加载交易数据
+    loadInitialTransactions();
+  }, [apiSymbol, fetchTokenTransactions, setTransactions]);
 
   // 根据主题设置 body 的 class
   useEffect(() => {
@@ -34,62 +99,26 @@ const TokenDetail: React.FC = () => {
     }
   }, [isDark]);
 
-  // 获取代币列表和详情
+  // 清除新交易标记（当用户滚动或点击时）
   useEffect(() => {
-    const fetchData = async () => {
-      if (!symbol) return;
-      
-      try {
-        setLoading(true);
-        setError(null);
-
-        // 获取代币列表
-        const tokens = await ApiService.getTokens();
-        setTokenList(tokens);
-        
-        // 处理symbol映射：vUSD -> VUSD
-        const apiSymbol = symbol === 'vUSD' ? 'VUSD' : symbol;
-        
-        // 找到当前代币信息
-        const currentToken = tokens.find(t => t.symbol === apiSymbol);
-        if (!currentToken) {
-          setError('Token not found');
-          return;
-        }
-        setToken(currentToken);
-
-        // 并行获取账户数量、总供应量、交易计数和最新交易
-        const [accountCount, totalSupply, txCount, latestTxs] = await Promise.all([
-          ApiService.getAccountCount(apiSymbol),
-          ApiService.getTotalSupply(apiSymbol),
-          ApiService.getTxCount(apiSymbol),
-          ApiService.getLatestTransactions(50, apiSymbol)
-        ]);
-
-        console.log('API返回的数据:', {
-          symbol: apiSymbol,
-          accountCount,
-          totalSupply,
-          txCount
-        });
-
-        setStats({
-          accountCount: accountCount || 0,
-          totalSupply: totalSupply || '0',
-          totalTransactions: txCount || 0
-        });
-
-        setTransactions(latestTxs);
-      } catch (err) {
-        console.error('Failed to fetch token details:', err);
-        setError('Failed to load token details');
-      } finally {
-        setLoading(false);
-      }
+    const handleInteraction = () => {
+      clearNewFlags();
     };
 
-    fetchData();
-  }, [symbol]);
+    window.addEventListener('scroll', handleInteraction);
+    window.addEventListener('click', handleInteraction);
+
+    return () => {
+      window.removeEventListener('scroll', handleInteraction);
+      window.removeEventListener('click', handleInteraction);
+    };
+  }, [clearNewFlags]);
+
+  // 处理点击logo的逻辑
+  const handleLogoClick = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    navigate('/');
+  }, [navigate]);
 
   const handleSearch = (query: string) => {
     // TODO: 实现搜索功能
@@ -112,13 +141,50 @@ const TokenDetail: React.FC = () => {
 
   // 创建代币映射表
   const tokenMap: { [key: string]: { symbol: string; decimals: number } } = {};
-  tokenList.forEach(t => {
+  cacheData.tokens.forEach(t => {
     tokenMap[t.symbol] = { symbol: t.symbol, decimals: t.decimals };
   });
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-dark-bg' : 'bg-gray-50'}`}>
-      <Header onSearch={handleSearch} isDark={isDark} />
+      <header className={`${isDark ? 'bg-dark-bg border-dark-border' : 'border-gray-200'}`}>
+        <div className="container mx-auto" style={{ padding: '0 3rem' }}>
+          <div className="flex items-center justify-between">
+            {/* Logo with data passing */}
+            <div className="flex items-center">
+              <div 
+                onClick={handleLogoClick}
+                className="cursor-pointer no-preload"
+              >
+                <img 
+                  src="/logo.svg" 
+                  alt="Vly Explorer" 
+                  style={{ height: '5rem' }} 
+                  className="w-auto hover:opacity-70 transition-opacity" 
+                />
+              </div>
+            </div>
+
+            {/* Search Bar */}
+            <form onSubmit={(e) => { e.preventDefault(); handleSearch(searchQuery); }} className="max-w-xl w-full md:w-96">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search"
+                  className={`w-full ${isDark
+                      ? 'bg-dark-card border-dark-border text-white placeholder-gray-500'
+                      : 'bg-gray-50 border-gray-300 text-gray-900 placeholder-gray-400'
+                    } border rounded-lg py-2.5 px-4 pl-10 focus:outline-none focus:border-primary-blue transition-colors`}
+                />
+                <FiSearch className={`absolute left-3 top-1/2 transform -translate-y-1/2 ${isDark ? 'text-gray-500' : 'text-gray-400'
+                  } text-lg`} />
+              </div>
+            </form>
+          </div>
+        </div>
+      </header>
       
       <main className="container mx-auto" style={{ padding: '1rem 3rem' }}>
         {error && (
@@ -127,15 +193,7 @@ const TokenDetail: React.FC = () => {
           </div>
         )}
 
-        {loading ? (
-          <div className={`${
-            isDark 
-              ? 'bg-dark-card border-dark-border' 
-              : 'bg-white border-gray-200 shadow-sm'
-          } border rounded-lg p-8 text-center`}>
-            <div className={isDark ? 'text-gray-400' : 'text-gray-500'}>Loading token details...</div>
-          </div>
-        ) : token && stats ? (
+        {token && tokenStats ? (
           <>
             {/* Token Info Card */}
             <div className={`${
@@ -177,7 +235,7 @@ const TokenDetail: React.FC = () => {
                     </span>
                   </div>
                   <p className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                    {formatNumber(stats.totalTransactions)}
+                    <RollingNumber value={tokenStats.totalTransactionCount} />
                   </p>
                 </div>
 
@@ -195,7 +253,7 @@ const TokenDetail: React.FC = () => {
                     </span>
                   </div>
                   <p className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                    {formatNumber(stats.totalSupply)}
+                    <RollingNumber value={tokenStats.totalSupply} />
                   </p>
                 </div>
 
@@ -213,25 +271,56 @@ const TokenDetail: React.FC = () => {
                     </span>
                   </div>
                   <p className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                    {formatNumber(stats.accountCount)}
+                    <RollingNumber value={tokenStats.totalAddresses.toString()} />
                   </p>
                 </div>
               </div>
             </div>
-
-            {/* Latest Transactions */}
-            <div className="mb-4">
-              <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                Latest Transactions
-              </h2>
-            </div>
-            <TransactionTable 
-              transactions={transactions} 
-              tokens={tokenMap} 
-              isDark={isDark}
-            />
           </>
-        ) : null}
+        ) : (
+          <div className={`${
+            isDark 
+              ? 'bg-dark-card border-dark-border' 
+              : 'bg-white border-gray-200 shadow-sm'
+          } border rounded-lg p-8 text-center`}>
+            <div className={isDark ? 'text-gray-400' : 'text-gray-500'}>Loading token details...</div>
+          </div>
+        )}
+
+        {/* 交易列表独立显示 */}
+        {transactionsLoading ? (
+          <div className={`${
+            isDark 
+              ? 'bg-dark-card border-dark-border' 
+              : 'bg-white border-gray-200 shadow-sm'
+          } border rounded-lg p-8 text-center`}>
+            <div className={isDark ? 'text-gray-400' : 'text-gray-500'}>
+            Loading transactions...
+            </div>
+          </div>
+        ) : transactions.length === 0 ? (
+          <div className={`${
+            isDark 
+              ? 'bg-dark-card border-dark-border' 
+              : 'bg-white border-gray-200 shadow-sm'
+          } border rounded-lg p-8 text-center`}>
+            <div className={isDark ? 'text-gray-400' : 'text-gray-500'}>
+            No transactions found
+            </div>
+            {error && (
+              <div className="mt-4 text-sm text-red-500">
+                {error}
+              </div>
+            )}
+          </div>
+        ) : (
+          <TransactionTable 
+            transactions={transactions} 
+            tokens={tokenMap} 
+            isDark={isDark}
+            headerRef={setHeaderRef}
+          />
+        )}
       </main>
 
       {/* 返回顶部按钮 */}

@@ -6,19 +6,25 @@ export const formatNumber = (num: number | string): string => {
     return '0';
   }
   
-  // 如果是字符串，先移除下划线分隔符
-  let cleanedNum = num;
-  if (typeof num === 'string') {
-    cleanedNum = num.replace(/_/g, '');
-  }
+  // 如果是字符串，先移除下划线和逗号分隔符
+  let cleanedNum = num.toString();
+  cleanedNum = cleanedNum.replace(/[_,]/g, '');
   
-  const number = typeof cleanedNum === 'string' ? parseFloat(cleanedNum) : cleanedNum;
-  
-  if (isNaN(number)) {
+  // 检查是否是有效的数字字符串
+  if (!/^\d+(\.\d+)?$/.test(cleanedNum)) {
     return '0';
   }
   
-  return new Intl.NumberFormat('en-US').format(number);
+  // 分离整数部分和小数部分
+  const parts = cleanedNum.split('.');
+  const integerPart = parts[0];
+  const decimalPart = parts[1];
+  
+  // 从右到左添加千位分隔符
+  const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  
+  // 如果有小数部分，拼接起来
+  return decimalPart !== undefined ? `${formattedInteger}.${decimalPart}` : formattedInteger;
 };
 
 // 格式化代币数量（考虑精度）

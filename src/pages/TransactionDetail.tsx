@@ -140,7 +140,7 @@ const TransactionDetail: React.FC = () => {
   return (
     <div className={`min-h-screen ${isDark ? 'bg-dark-bg' : 'bg-gray-50'}`}>
       <Header isDark={isDark} />
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto" style={{ padding: '1rem 3rem' }}>
         {/* Back button */}
         <button
           onClick={() => navigate('/')}
@@ -159,17 +159,17 @@ const TransactionDetail: React.FC = () => {
             : 'bg-white border-gray-200 shadow-sm'
         } border rounded-lg overflow-hidden`}>
           <div className={`px-6 py-4 border-b ${isDark ? 'border-dark-border' : 'border-gray-200'}`}>
-            <h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-              Transactions
+            <h1 className={`text-3xl font-black ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              Transaction Details
             </h1>
           </div>
 
-          <div className="p-6 space-y-6">
+          <div className="p-6 space-y-4">
             {/* Transaction ID */}
             <div className="flex items-center justify-between">
-              <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Transaction:</span>
+              <span className={`text-base font-semibold ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Transaction Index :</span>
               <div className="flex items-center">
-                <span className={`font-mono ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                <span className={`font-mono font-bold text-lg ${isDark ? 'text-white' : 'text-gray-900'}`}>
                   {transaction.index}
                 </span>
                 {renderCopyButton(transaction.index.toString(), 'tx')}
@@ -178,25 +178,17 @@ const TransactionDetail: React.FC = () => {
 
             {/* Status */}
             <div className="flex items-center justify-between">
-              <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Status:</span>
-              <span className="flex items-center text-green-500">
+              <span className={`text-base font-semibold ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Status :</span>
+              <span className="flex items-center text-green-500 font-bold">
                 <FiCheckCircle className="mr-1" />
                 Completed
               </span>
             </div>
 
-            {/* Block */}
-            <div className="flex items-center justify-between">
-              <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Block:</span>
-              <span className={`font-mono ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                {transaction.index}
-              </span>
-            </div>
-
             {/* Timestamp */}
             <div className="flex items-center justify-between">
-              <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Timestamp:</span>
-              <span className={isDark ? 'text-gray-300' : 'text-gray-700'}>
+              <span className={`text-base font-semibold ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Timestamp :</span>
+              <span className={`font-medium ${isDark ? 'text-gray-200' : 'text-gray-800'}`}>
                 {formatDateTime(transaction.timestamp)} UTC
               </span>
             </div>
@@ -205,13 +197,13 @@ const TransactionDetail: React.FC = () => {
 
             {/* From */}
             <div className="flex items-center justify-between">
-              <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>From:</span>
+              <span className={`text-base font-semibold ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>From :</span>
               <div className="flex items-center">
                 <span 
                   onClick={() => handleAddressClick(fromAddress)}
-                  className={`font-mono text-primary-blue hover:underline cursor-pointer`}
+                  className={`font-mono font-bold text-primary-blue hover:underline cursor-pointer break-all`}
                 >
-                  {formatAddress(fromAddress, 10, 10)}
+                  {fromAddress}
                 </span>
                 {renderCopyButton(fromAddress, 'from')}
               </div>
@@ -219,15 +211,15 @@ const TransactionDetail: React.FC = () => {
 
             {/* To */}
             <div className="flex items-center justify-between">
-              <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                {transaction.kind === 'approve' ? 'Spender:' : 'To:'}
+              <span className={`text-base font-semibold ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                {transaction.kind === 'approve' ? 'Spender:' : 'To :'}
               </span>
               <div className="flex items-center">
                 <span 
                   onClick={() => handleAddressClick(toAddress)}
-                  className={`font-mono text-primary-blue hover:underline cursor-pointer`}
+                  className={`font-mono font-bold text-primary-blue hover:underline cursor-pointer break-all`}
                 >
-                  {formatAddress(toAddress, 10, 10)}
+                  {toAddress}
                 </span>
                 {renderCopyButton(toAddress, 'to')}
               </div>
@@ -237,24 +229,24 @@ const TransactionDetail: React.FC = () => {
 
             {/* Amount */}
             <div className="flex items-center justify-between">
-              <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Amount:</span>
-              <span className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              <span className={`text-base font-semibold ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Amount :</span>
+              <span className={`font-bold text-lg ${isDark ? 'text-white' : 'text-gray-900'}`}>
                 {amount} {token.symbol}
               </span>
             </div>
 
             {/* Fee */}
             <div className="flex items-center justify-between">
-              <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Fee:</span>
-              <span className={isDark ? 'text-gray-300' : 'text-gray-700'}>
+              <span className={`text-base font-semibold ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Fee :</span>
+              <span className={`font-medium ${isDark ? 'text-gray-200' : 'text-gray-800'}`}>
                 {fee} {token.symbol}
               </span>
             </div>
 
             {/* Memo */}
             <div className="flex items-center justify-between">
-              <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Memo:</span>
-              <span className={isDark ? 'text-gray-300' : 'text-gray-700'}>
+              <span className={`text-base font-semibold ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Memo :</span>
+              <span className={`font-medium ${isDark ? 'text-gray-200' : 'text-gray-800'}`}>
                 {transaction.memo || '0'}
               </span>
             </div>

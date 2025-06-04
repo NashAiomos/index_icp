@@ -24,7 +24,7 @@ const Header: React.FC<HeaderProps> = ({ onSearch, isDark }) => {
 
           {/* Logo */}
           <div className="flex items-center">
-            <Link to="/" className="cursor-pointer">
+            <Link to="/" className="cursor-pointer no-preload">
               <img 
                 src="/logo.svg" 
                 alt="Vly Explorer" 

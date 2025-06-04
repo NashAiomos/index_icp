@@ -7,6 +7,7 @@ import { formatAddress, formatNumber } from '../utils/format';
 import Header from '../components/Header';
 import TransactionTable from '../components/TransactionTable';
 import BackToTopButton from '../components/BackToTopButton';
+import { useAutoRefreshTransactions } from '../hooks/useAutoRefreshTransactions';
 
 // 扩展 Transaction 类型，添加代币信息
 interface TransactionWithToken extends Transaction {
@@ -36,7 +37,6 @@ const AddressDetail: React.FC = () => {
   const isDark = useTheme();
   
   // 交易列表相关状态
-  const [transactions, setTransactions] = useState<TransactionWithToken[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [vusdSkip, setVusdSkip] = useState(0);
@@ -55,7 +55,52 @@ const AddressDetail: React.FC = () => {
     'VUSD': { symbol: 'VUSD', decimals: 6 }
   };
   
-  // 获取并合并交易
+  // 获取并合并交易（用于自动刷新）
+  const fetchTransactionsForRefresh = useCallback(async () => {
+    if (!address) return [];
+    
+    try {
+      // 并行获取 VUSD 和 LIKE 的最新交易
+      const [vusdResult, likeResult] = await Promise.all([
+        ApiService.getAccountTransactions(address, 'VUSD', TRANSACTIONS_PER_LOAD, 0),
+        ApiService.getAccountTransactions(address, 'LIKE', TRANSACTIONS_PER_LOAD, 0)
+      ]);
+      
+      // 为交易添加代币标识
+      const vusdTransactions = vusdResult.transactions.map(tx => ({
+        ...tx,
+        _tokenSymbol: 'VUSD'
+      }));
+      
+      const likeTransactions = likeResult.transactions.map(tx => ({
+        ...tx,
+        _tokenSymbol: 'LIKE'
+      }));
+      
+      // 合并并排序
+      const mergedTransactions = [...vusdTransactions, ...likeTransactions]
+        .sort((a, b) => b.timestamp - a.timestamp);
+      
+      return mergedTransactions;
+    } catch (err) {
+      console.error('Failed to fetch transactions:', err);
+      return [];
+    }
+  }, [address]);
+  
+  // 使用自动刷新 hook
+  const { 
+    transactions, 
+    setTransactions, 
+    setHeaderRef,
+    clearNewFlags
+  } = useAutoRefreshTransactions({
+    fetchFunction: fetchTransactionsForRefresh,
+    interval: 20000, // 20秒
+    enabled: true
+  });
+  
+  // 获取并合并交易（用于分页加载）
   const fetchAndMergeTransactions = async (isInitial: boolean = false) => {
     if (!address) return [];
     
@@ -118,16 +163,13 @@ const AddressDetail: React.FC = () => {
         setVusdBalance(vusdBalanceData);
         
         // 获取初始交易数据
-        const initialTransactions = await fetchAndMergeTransactions(true);
-        
-        // 按时间戳降序排序（最新的在前）
-        const sortedTransactions = initialTransactions.sort((a, b) => b.timestamp - a.timestamp);
-        setTransactions(sortedTransactions);
+        const initialTransactions = await fetchTransactionsForRefresh();
+        setTransactions(initialTransactions);
         
         setLoading(false);
 
         // 使用获取到的交易数据计算统计信息
-        if (sortedTransactions.length > 0) {
+        if (initialTransactions.length > 0) {
           // 获取所有交易（用于统计）
           const [allVusdResult, allLikeResult] = await Promise.all([
             ApiService.getAccountTransactions(address, 'VUSD', 1000, 0).catch(() => ({ transactions: [] })),
@@ -167,7 +209,7 @@ const AddressDetail: React.FC = () => {
     };
 
     fetchAddressData();
-  }, [address]);
+  }, [address, fetchTransactionsForRefresh, setTransactions]);
   
   // 加载更多交易
   const loadMoreTransactions = useCallback(async () => {
@@ -180,13 +222,19 @@ const AddressDetail: React.FC = () => {
       if (moreTransactions.length === 0) {
         setHasMore(false);
       } else {
+        // 转换并添加新交易
+        const convertedTxs = moreTransactions.map(tx => ({
+          ...tx,
+          _tokenSymbol: tx.tokenSymbol
+        }));
+        
         // 合并新交易和现有交易，然后重新排序
-        const allTransactions = [...transactions, ...moreTransactions];
+        const allTransactions = [...transactions, ...convertedTxs];
         const sortedTransactions = allTransactions.sort((a, b) => b.timestamp - a.timestamp);
         
         // 去重（基于交易索引和代币类型）
         const uniqueTransactions = sortedTransactions.filter((tx, index, self) => 
-          index === self.findIndex(t => t.index === tx.index && t.tokenSymbol === tx.tokenSymbol)
+          index === self.findIndex(t => t.index === tx.index && t._tokenSymbol === tx._tokenSymbol)
         );
         
         setTransactions(uniqueTransactions);
@@ -196,7 +244,7 @@ const AddressDetail: React.FC = () => {
     } finally {
       setLoadingMore(false);
     }
-  }, [address, hasMore, loadingMore, transactions, fetchAndMergeTransactions]);
+  }, [address, hasMore, loadingMore, transactions, setTransactions]);
   
   // 设置无限滚动观察器
   useEffect(() => {
@@ -223,6 +271,21 @@ const AddressDetail: React.FC = () => {
       }
     };
   }, [hasMore, loadingMore, loadMoreTransactions]);
+  
+  // 清除新交易标记（当用户滚动或点击时）
+  useEffect(() => {
+    const handleInteraction = () => {
+      clearNewFlags();
+    };
+
+    window.addEventListener('scroll', handleInteraction);
+    window.addEventListener('click', handleInteraction);
+
+    return () => {
+      window.removeEventListener('scroll', handleInteraction);
+      window.removeEventListener('click', handleInteraction);
+    };
+  }, [clearNewFlags]);
 
   const handleSearch = (query: string) => {
     // TODO: 实现搜索功能
@@ -465,15 +528,10 @@ const AddressDetail: React.FC = () => {
             {transactions.length > 0 && (
               <div className="mt-6">
                 <TransactionTable 
-                  transactions={transactions.map(tx => {
-                    const { tokenSymbol, ...transaction } = tx;
-                    return {
-                      ...transaction,
-                      _tokenSymbol: tokenSymbol
-                    } as Transaction & { _tokenSymbol: string };
-                  })} 
+                  transactions={transactions} 
                   tokens={tokenMap} 
-                  isDark={isDark} 
+                  isDark={isDark}
+                  headerRef={setHeaderRef}
                 />
                 
                 {/* 加载更多指示器 */}
