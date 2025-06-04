@@ -1,0 +1,41 @@
+# 依赖自动更新配置
+version: 2
+updates:
+  # npm 依赖更新
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Shanghai"
+    # 限制打开的 PR 数量
+    open-pull-requests-limit: 10
+    # 提交消息配置
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
+      include: "scope"
+    # 自动合并配置 (仅针对补丁版本)
+    auto-merge:
+      dependency-type: "development"
+      update-type: "security:patch"
+    # 标签配置
+    labels:
+      - "dependencies"
+      - "automated"
+    # 审查者配置 (可选)
+    reviewers:
+      - "your-github-username"  # 替换为您的 GitHub 用户名
+    
+  # GitHub Actions 工作流更新
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    labels:
+      - "github-actions"
+      - "automated" 

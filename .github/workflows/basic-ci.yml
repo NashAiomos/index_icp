@@ -1,0 +1,47 @@
+# 基础 CI 工作流 - 适用于项目初期
+name: 基础 CI
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+
+jobs:
+  test-and-build:
+    name: 测试和构建
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      
+    - name: 设置 Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        
+    - name: 安装依赖
+      run: npm ci
+      
+    - name: TypeScript 类型检查
+      run: npx tsc --noEmit
+      
+    - name: 运行测试
+      run: npm test -- --watchAll=false
+      env:
+        CI: true
+        
+    - name: 构建项目
+      run: npm run build
+      
+    - name: 检查构建结果
+      run: |
+        echo "构建完成，检查产物..."
+        ls -la build/
+        echo "构建产物大小: $(du -sh build/)" 
