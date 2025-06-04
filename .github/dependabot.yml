@@ -16,10 +16,6 @@ updates:
       prefix: "chore"
       prefix-development: "chore"
       include: "scope"
-    # 自动合并配置 (仅针对补丁版本)
-    auto-merge:
-      dependency-type: "development"
-      update-type: "security:patch"
     # 标签配置
     labels:
       - "dependencies"
@@ -27,6 +23,10 @@ updates:
     # 审查者配置 (可选)
     reviewers:
       - "your-github-username"  # 替换为您的 GitHub 用户名
+    # 允许的更新类型
+    allow:
+      - dependency-type: "direct"
+      - dependency-type: "indirect"
     
   # GitHub Actions 工作流更新
   - package-ecosystem: "github-actions"
