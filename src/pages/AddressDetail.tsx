@@ -1,10 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ApiService } from '../services/api';
-import { AccountBalance } from '../types';
+import { AccountBalance, Transaction } from '../types';
 import { useTheme } from '../hooks/useTheme';
 import { formatAddress, formatNumber } from '../utils/format';
 import Header from '../components/Header';
+import TransactionTable from '../components/TransactionTable';
+import BackToTopButton from '../components/BackToTopButton';
+
+// 扩展 Transaction 类型，添加代币信息
+interface TransactionWithToken extends Transaction {
+  tokenSymbol: string;
+}
 
 interface AddressStats {
   totalTransactionCount: number;
@@ -27,6 +34,70 @@ const AddressDetail: React.FC = () => {
   const [statsLoading, setStatsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const isDark = useTheme();
+  
+  // 交易列表相关状态
+  const [transactions, setTransactions] = useState<TransactionWithToken[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [vusdSkip, setVusdSkip] = useState(0);
+  const [likeSkip, setLikeSkip] = useState(0);
+  
+  // 无限滚动相关
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  
+  // 每次加载的交易数量
+  const TRANSACTIONS_PER_LOAD = 50;
+  
+  // 代币映射表
+  const tokenMap = {
+    'LIKE': { symbol: 'LIKE', decimals: 6 },
+    'VUSD': { symbol: 'VUSD', decimals: 6 }
+  };
+  
+  // 获取并合并交易
+  const fetchAndMergeTransactions = async (isInitial: boolean = false) => {
+    if (!address) return [];
+    
+    try {
+      // 并行获取 VUSD 和 LIKE 的交易
+      const [vusdResult, likeResult] = await Promise.all([
+        ApiService.getAccountTransactions(address, 'VUSD', TRANSACTIONS_PER_LOAD, isInitial ? 0 : vusdSkip),
+        ApiService.getAccountTransactions(address, 'LIKE', TRANSACTIONS_PER_LOAD, isInitial ? 0 : likeSkip)
+      ]);
+      
+      // 为交易添加代币标识
+      const vusdTransactions: TransactionWithToken[] = vusdResult.transactions.map(tx => ({
+        ...tx,
+        tokenSymbol: 'VUSD'
+      }));
+      
+      const likeTransactions: TransactionWithToken[] = likeResult.transactions.map(tx => ({
+        ...tx,
+        tokenSymbol: 'LIKE'
+      }));
+      
+      // 更新skip值
+      if (!isInitial) {
+        setVusdSkip(prev => prev + vusdResult.transactions.length);
+        setLikeSkip(prev => prev + likeResult.transactions.length);
+      } else {
+        setVusdSkip(vusdResult.transactions.length);
+        setLikeSkip(likeResult.transactions.length);
+      }
+      
+      // 如果两种代币都没有更多交易了，设置hasMore为false
+      if (vusdResult.transactions.length < TRANSACTIONS_PER_LOAD && likeResult.transactions.length < TRANSACTIONS_PER_LOAD) {
+        setHasMore(false);
+      }
+      
+      // 合并交易
+      return [...vusdTransactions, ...likeTransactions];
+    } catch (err) {
+      console.error('Failed to fetch transactions:', err);
+      return [];
+    }
+  };
 
   useEffect(() => {
     if (!address) return;
@@ -37,32 +108,46 @@ const AddressDetail: React.FC = () => {
         setStatsLoading(true);
         setError(null);
 
-        // 并行获取LIKE和VUSD余额以及交易数据
-        const [likeBalanceData, vusdBalanceData, likeTransactions, vusdTransactions] = await Promise.all([
+        // 并行获取LIKE和VUSD余额
+        const [likeBalanceData, vusdBalanceData] = await Promise.all([
           ApiService.getBalance(address, 'LIKE').catch(() => null),
           ApiService.getBalance(address, 'VUSD').catch(() => null),
-          ApiService.getAccountTransactions(address, 'LIKE').catch(() => ({ transactions: [] })),
-          ApiService.getAccountTransactions(address, 'VUSD').catch(() => ({ transactions: [] }))
         ]);
 
         setLikeBalance(likeBalanceData);
         setVusdBalance(vusdBalanceData);
+        
+        // 获取初始交易数据
+        const initialTransactions = await fetchAndMergeTransactions(true);
+        
+        // 按时间戳降序排序（最新的在前）
+        const sortedTransactions = initialTransactions.sort((a, b) => b.timestamp - a.timestamp);
+        setTransactions(sortedTransactions);
+        
         setLoading(false);
 
-        // 合并所有交易并计算统计数据
-        const allTransactions = [...likeTransactions.transactions, ...vusdTransactions.transactions];
-        
-        if (allTransactions.length > 0) {
-          // 按时间戳排序
-          allTransactions.sort((a, b) => a.timestamp - b.timestamp);
+        // 使用获取到的交易数据计算统计信息
+        if (sortedTransactions.length > 0) {
+          // 获取所有交易（用于统计）
+          const [allVusdResult, allLikeResult] = await Promise.all([
+            ApiService.getAccountTransactions(address, 'VUSD', 1000, 0).catch(() => ({ transactions: [] })),
+            ApiService.getAccountTransactions(address, 'LIKE', 1000, 0).catch(() => ({ transactions: [] }))
+          ]);
           
-          // 计算交易统计信息
-          setAddressStats({
-            totalTransactionCount: allTransactions.length, // 交易总数就是交易数量
-            firstTransactionTime: allTransactions[0].timestamp,
-            lastTransactionTime: allTransactions[allTransactions.length - 1].timestamp,
-            transactionCount: allTransactions.length
-          });
+          const allTransactions = [...allVusdResult.transactions, ...allLikeResult.transactions];
+          
+          if (allTransactions.length > 0) {
+            // 按时间戳排序
+            allTransactions.sort((a, b) => a.timestamp - b.timestamp);
+            
+            // 计算交易统计信息
+            setAddressStats({
+              totalTransactionCount: allTransactions.length,
+              firstTransactionTime: allTransactions[0].timestamp,
+              lastTransactionTime: allTransactions[allTransactions.length - 1].timestamp,
+              transactionCount: allTransactions.length
+            });
+          }
         } else {
           // 如果没有交易，设置默认值
           setAddressStats({
@@ -83,6 +168,61 @@ const AddressDetail: React.FC = () => {
 
     fetchAddressData();
   }, [address]);
+  
+  // 加载更多交易
+  const loadMoreTransactions = useCallback(async () => {
+    if (loadingMore || !hasMore || !address) return;
+    
+    try {
+      setLoadingMore(true);
+      const moreTransactions = await fetchAndMergeTransactions(false);
+      
+      if (moreTransactions.length === 0) {
+        setHasMore(false);
+      } else {
+        // 合并新交易和现有交易，然后重新排序
+        const allTransactions = [...transactions, ...moreTransactions];
+        const sortedTransactions = allTransactions.sort((a, b) => b.timestamp - a.timestamp);
+        
+        // 去重（基于交易索引和代币类型）
+        const uniqueTransactions = sortedTransactions.filter((tx, index, self) => 
+          index === self.findIndex(t => t.index === tx.index && t.tokenSymbol === tx.tokenSymbol)
+        );
+        
+        setTransactions(uniqueTransactions);
+      }
+    } catch (err) {
+      console.error('Failed to load more transactions:', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [address, hasMore, loadingMore, transactions, fetchAndMergeTransactions]);
+  
+  // 设置无限滚动观察器
+  useEffect(() => {
+    const options = {
+      root: null,
+      rootMargin: '100px',
+      threshold: 0.1
+    };
+    
+    observerRef.current = new IntersectionObserver((entries) => {
+      const [entry] = entries;
+      if (entry.isIntersecting && hasMore && !loadingMore) {
+        loadMoreTransactions();
+      }
+    }, options);
+    
+    if (bottomRef.current) {
+      observerRef.current.observe(bottomRef.current);
+    }
+    
+    return () => {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+      }
+    };
+  }, [hasMore, loadingMore, loadMoreTransactions]);
 
   const handleSearch = (query: string) => {
     // TODO: 实现搜索功能
@@ -137,7 +277,7 @@ const AddressDetail: React.FC = () => {
     <div className={`min-h-screen ${isDark ? 'bg-dark-bg' : 'bg-gray-50'}`}>
       <Header onSearch={handleSearch} isDark={isDark} />
       
-      <main className="container mx-auto px-4 py-8">
+      <main className="container mx-auto" style={{ padding: '1rem 3rem' }}>
         {/* 返回按钮 */}
         <Link 
           to="/"
@@ -148,7 +288,7 @@ const AddressDetail: React.FC = () => {
           <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
-          返回首页
+          Back to Explorer
         </Link>
 
         {loading ? (
@@ -183,9 +323,12 @@ const AddressDetail: React.FC = () => {
                   <h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
                     Account
                   </h1>
-                  <p className={`font-mono text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'} flex items-center`}>
-                    {formatAddress(address || '')}
-                    <button className="ml-2 p-1 hover:bg-gray-100 rounded">
+                  <p className={`font-mono text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'} flex items-center break-all`}>
+                    {address || ''}
+                    <button 
+                      onClick={() => navigator.clipboard.writeText(address || '')}
+                      className="ml-2 p-1 hover:bg-gray-100 rounded flex-shrink-0"
+                    >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                       </svg>
@@ -269,10 +412,12 @@ const AddressDetail: React.FC = () => {
                   isDark ? 'bg-blue-50/5' : 'bg-blue-50'
                 }`}>
                   <div className="flex items-center">
-                    <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center mr-3">
-                      <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M5,9V21H1V9H5M9,21A2,2 0 0,1 7,19V9C7,8.45 7.22,7.95 7.59,7.59L14.17,1L15.23,2.06C15.5,2.33 15.67,2.7 15.67,3.11L15.64,3.43L14.69,8H21C21.53,8 22,8.21 22.39,8.6C22.78,8.99 23,9.47 23,10A1,1 0 0,1 22.83,10.17L19.05,18.05C18.65,18.88 17.86,19.45 16.95,19.45H9M13.6,7L14.5,3.43L9,8.95V19.5H16.95L20.72,11.5H13.6V7Z"/>
-                      </svg>
+                    <div className="w-10 h-10 flex items-center justify-center mr-3">
+                      <img 
+                        src="/logo_like.svg" 
+                        alt="LIKE Logo" 
+                        className="w-10 h-10 object-contain"
+                      />
                     </div>
                     <div>
                       <p className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
@@ -293,10 +438,12 @@ const AddressDetail: React.FC = () => {
                   isDark ? 'bg-purple-50/5' : 'bg-purple-50'
                 }`}>
                   <div className="flex items-center">
-                    <div className="w-10 h-10 rounded-full bg-purple-500 flex items-center justify-center mr-3">
-                      <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M7,15H9C9,16.08 10.37,17 12,17C13.63,17 15,16.08 15,15C15,13.9 13.96,13.5 11.76,12.97C9.64,12.44 7,11.78 7,9C7,7.21 8.47,5.69 10.5,5.18V3H13.5V5.18C15.53,5.69 17,7.21 17,9H15C15,7.92 13.63,7 12,7C10.37,7 9,7.92 9,9C9,10.1 10.04,10.5 12.24,11.03C14.36,11.56 17,12.22 17,15C17,16.79 15.53,18.31 13.5,18.82V21H10.5V18.82C8.47,18.31 7,16.79 7,15Z"/>
-                      </svg>
+                    <div className="w-10 h-10 flex items-center justify-center mr-3">
+                      <img 
+                        src="/logo_vusd.svg" 
+                        alt="vUSD Logo" 
+                        className="w-10 h-10 object-contain"
+                      />
                     </div>
                     <div>
                       <p className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
@@ -313,9 +460,56 @@ const AddressDetail: React.FC = () => {
                 </div>
               </div>
             </div>
+            
+            {/* 交易列表 */}
+            {transactions.length > 0 && (
+              <div className="mt-6">
+                <TransactionTable 
+                  transactions={transactions.map(tx => {
+                    const { tokenSymbol, ...transaction } = tx;
+                    return {
+                      ...transaction,
+                      _tokenSymbol: tokenSymbol
+                    } as Transaction & { _tokenSymbol: string };
+                  })} 
+                  tokens={tokenMap} 
+                  isDark={isDark} 
+                />
+                
+                {/* 加载更多指示器 */}
+                <div ref={bottomRef} className="mt-8 text-center">
+                  {loadingMore && (
+                    <div className={isDark ? 'text-gray-400' : 'text-gray-500'}>
+                      Loading more transactions...
+                    </div>
+                  )}
+                  {!hasMore && transactions.length >= TRANSACTIONS_PER_LOAD * 2 && (
+                    <div className={isDark ? 'text-gray-500' : 'text-gray-400'}>
+                      No more transactions to load
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            
+            {/* 如果没有交易 */}
+            {!loading && transactions.length === 0 && (
+              <div className={`${
+                isDark 
+                  ? 'bg-dark-card border-dark-border' 
+                  : 'bg-white border-gray-200 shadow-sm'
+              } border rounded-lg p-8 text-center mt-6`}>
+                <div className={isDark ? 'text-gray-400' : 'text-gray-500'}>
+                  该地址暂无交易记录
+                </div>
+              </div>
+            )}
           </>
         )}
       </main>
+
+      {/* 返回顶部按钮 */}
+      <BackToTopButton threshold={300} isDark={isDark} />
     </div>
   );
 };

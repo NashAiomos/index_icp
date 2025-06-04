@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import HomePage from './pages/HomePage';
 import TransactionDetail from './pages/TransactionDetail';
 import AddressDetail from './pages/AddressDetail';
+import TokenDetail from './pages/TokenDetail';
 
 function App() {
   return (
@@ -11,6 +12,7 @@ function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/transaction/:index" element={<TransactionDetail />} />
         <Route path="/address/:address" element={<AddressDetail />} />
+        <Route path="/token/:symbol" element={<TokenDetail />} />
       </Routes>
     </Router>
   );

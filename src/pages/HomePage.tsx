@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Header from '../components/Header';
 import TokenCard from '../components/TokenCard';
 import TransactionTable from '../components/TransactionTable';
+import BackToTopButton from '../components/BackToTopButton';
 import { ApiService } from '../services/api';
 import { Token, Transaction } from '../types';
 import { useTheme } from '../hooks/useTheme';
@@ -53,15 +54,16 @@ const HomePage: React.FC = () => {
         const stats: { [key: string]: any } = {};
         for (const token of tokenList) {
           try {
-            const [accountCount, txCount] = await Promise.all([
+            const [accountCount, txCount, totalSupply] = await Promise.all([
               ApiService.getAccountCount(token.symbol),
-              ApiService.getTxCount(token.symbol)
+              ApiService.getTxCount(token.symbol),
+              ApiService.getTotalSupply(token.symbol)
             ]);
             
             stats[token.symbol] = {
               name: token.name,
               totalTransactionCount: txCount.toString(),
-              transactions24h: txCount, // 暂时使用总交易数
+              totalSupply: totalSupply,
               totalAddresses: accountCount
             };
           } catch (err) {
@@ -214,7 +216,7 @@ const HomePage: React.FC = () => {
     <div className={`min-h-screen ${isDark ? 'bg-dark-bg' : 'bg-gray-50'}`}>
       <Header onSearch={handleSearch} isDark={isDark} />
       
-      <main className="container mx-auto px-4 py-8">
+      <main className="container mx-auto" style={{ padding: '1rem 3rem' }}>
         {error && (
           <div className="bg-red-500/10 border border-red-500 text-red-500 px-4 py-3 rounded-lg mb-6">
             {error}
@@ -229,7 +231,7 @@ const HomePage: React.FC = () => {
               symbol="LIKE"
               name={tokenStats['LIKE'].name}
               totalTransactionCount={tokenStats['LIKE'].totalTransactionCount}
-              transactions24h={tokenStats['LIKE'].transactions24h}
+              totalSupply={tokenStats['LIKE'].totalSupply}
               totalAddresses={tokenStats['LIKE'].totalAddresses}
               color="blue"
               isDark={isDark}
@@ -242,7 +244,7 @@ const HomePage: React.FC = () => {
               symbol="vUSD"
               name={tokenStats['VUSD'].name}
               totalTransactionCount={tokenStats['VUSD'].totalTransactionCount}
-              transactions24h={tokenStats['VUSD'].transactions24h}
+              totalSupply={tokenStats['VUSD'].totalSupply}
               totalAddresses={tokenStats['VUSD'].totalAddresses}
               color="purple"
               isDark={isDark}
@@ -279,6 +281,9 @@ const HomePage: React.FC = () => {
           </>
         )}
       </main>
+
+      {/* 返回顶部按钮 */}
+      <BackToTopButton threshold={300} isDark={isDark} />
     </div>
   );
 };

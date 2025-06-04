@@ -2,7 +2,22 @@ import { format } from 'date-fns';
 
 // 格式化数字，添加千位分隔符
 export const formatNumber = (num: number | string): string => {
-  const number = typeof num === 'string' ? parseFloat(num) : num;
+  if (num === null || num === undefined || num === '') {
+    return '0';
+  }
+  
+  // 如果是字符串，先移除下划线分隔符
+  let cleanedNum = num;
+  if (typeof num === 'string') {
+    cleanedNum = num.replace(/_/g, '');
+  }
+  
+  const number = typeof cleanedNum === 'string' ? parseFloat(cleanedNum) : cleanedNum;
+  
+  if (isNaN(number)) {
+    return '0';
+  }
+  
   return new Intl.NumberFormat('en-US').format(number);
 };
 
@@ -52,7 +67,7 @@ export const formatTokenAmount = (amount: any, decimals: number): string => {
 };
 
 // 格式化地址，显示前后部分
-export const formatAddress = (address: string, startLength: number = 6, endLength: number = 4): string => {
+export const formatAddress = (address: string, startLength: number = 12, endLength: number = 10): string => {
   if (!address) {
     return 'Unknown';
   }
@@ -60,7 +75,7 @@ export const formatAddress = (address: string, startLength: number = 6, endLengt
   if (address.length <= startLength + endLength) {
     return address;
   }
-  return `${address.slice(0, startLength)}...${address.slice(-endLength)}`;
+  return `${address.slice(0, startLength)} ... ${address.slice(-endLength)}`;
 };
 
 // 格式化日期时间
@@ -93,25 +108,42 @@ export const formatRelativeTime = (timestamp: number): string => {
 };
 
 // 将账户对象转换为字符串
-export const accountToString = (account: { owner: string; subaccount?: string | null }): string => {
+export const accountToString = (account: { owner: string; subaccount?: string | number[] | null }): string => {
   if (account.subaccount && account.subaccount !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
-    // 检查子账户是否为逗号分隔的格式
-    if (account.subaccount.includes(',')) {
-      // 分割子账户并检查是否全为0
-      const subParts = account.subaccount.split(',');
-      const hasNonZero = subParts.some(part => part !== '0' && part.trim() !== '');
+    // 处理数组格式的子账户
+    if (Array.isArray(account.subaccount)) {
+      const hasNonZero = account.subaccount.some(part => part !== 0 && String(part) !== '0');
       
-      // 如果全为0，则只返回主地址
       if (!hasNonZero) {
         return account.owner;
       }
       
-      // 如果包含非零值，返回完整地址
-      return `${account.owner}:${account.subaccount}`;
+      // 如果包含非零值，转换数组为字符串并返回完整地址
+      const subaccountStr = account.subaccount.join(',');
+      return `${account.owner}:${subaccountStr}`;
     }
     
-    // 原有的十六进制格式处理
-    return `${account.owner}:${account.subaccount}`;
+    // 处理字符串格式的子账户
+    if (typeof account.subaccount === 'string') {
+      // 检查子账户是否为逗号分隔的格式
+      if (account.subaccount.includes(',')) {
+        // 分割子账户并检查是否全为0
+        const subParts = account.subaccount.split(',');
+        const hasNonZero = subParts.some(part => part !== '0' && part.trim() !== '');
+        
+        // 如果全为0，则只返回主地址
+        if (!hasNonZero) {
+          return account.owner;
+        }
+        
+        // 如果包含非零值，返回完整地址
+        return `${account.owner}:${account.subaccount}`;
+      }
+      
+      // 原有的十六进制格式处理
+      return `${account.owner}:${account.subaccount}`;
+    }
   }
+  
   return account.owner;
 }; 

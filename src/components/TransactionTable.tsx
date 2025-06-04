@@ -51,7 +51,19 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions, token
     let to = 'Unknown';
     let amount = '0';
     
-    switch (tx.kind) {
+    // 首先检查是否是旧格式（直接在顶层的 from/to/amount）
+    if (tx.from && tx.to && tx.amount) {
+      // 这是旧格式，直接使用顶层的数据
+      from = typeof tx.from === 'string' ? tx.from : accountToString(tx.from);
+      to = typeof tx.to === 'string' ? tx.to : accountToString(tx.to);
+      amount = Array.isArray(tx.amount) ? tx.amount[0] : tx.amount;
+      return { from, to, amount };
+    }
+    
+    // 处理不同的 kind 格式（可能是大写或小写）
+    const kind = tx.kind?.toLowerCase();
+    
+    switch (kind) {
       case 'transfer':
         if (tx.transfer) {
           from = tx.transfer.from ? accountToString(tx.transfer.from) : 'Unknown';
@@ -85,19 +97,42 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions, token
         break;
       
       default:
-        // 向后兼容：尝试使用旧的字段格式
-        if (tx.from) {
-          from = typeof tx.from === 'string' ? tx.from : accountToString(tx.from);
+        // 检查是否直接存在字段数据（可能是大写的 Transfer、Burn 等）
+        const txAny = tx as any;
+        if (txAny['Transfer']) {
+          const transfer = txAny['Transfer'];
+          from = transfer.from ? accountToString(transfer.from) : 'Unknown';
+          to = transfer.to ? accountToString(transfer.to) : 'Unknown';
+          amount = transfer.amount && transfer.amount.length > 0 ? transfer.amount[0] : '0';
+        } else if (txAny['Burn']) {
+          const burn = txAny['Burn'];
+          from = burn.from ? accountToString(burn.from) : 'Unknown';
+          to = 'Burned';
+          amount = burn.amount && burn.amount.length > 0 ? burn.amount[0] : '0';
+        } else if (txAny['Mint']) {
+          const mint = txAny['Mint'];
+          from = 'Minted';
+          to = mint.to ? accountToString(mint.to) : 'Unknown';
+          amount = mint.amount && mint.amount.length > 0 ? mint.amount[0] : '0';
+        } else if (txAny['Approve']) {
+          const approve = txAny['Approve'];
+          from = approve.from ? accountToString(approve.from) : 'Unknown';
+          to = approve.spender ? accountToString(approve.spender) : 'Unknown';
+          amount = approve.amount && approve.amount.length > 0 ? approve.amount[0] : '0';
         }
-        if (tx.to) {
-          to = typeof tx.to === 'string' ? tx.to : accountToString(tx.to);
-        }
-        if (tx.amount) {
-          // 处理 amount 可能是数组的情况
-          if (Array.isArray(tx.amount)) {
-            amount = tx.amount.length > 0 ? tx.amount[0] : '0';
-          } else {
-            amount = tx.amount;
+        // 最后的尝试：遍历对象的所有属性
+        else {
+          // 查找包含交易数据的属性
+          for (const key of Object.keys(tx)) {
+            const value = txAny[key];
+            if (value && typeof value === 'object' && !Array.isArray(value)) {
+              if (value.from && value.to && value.amount) {
+                from = value.from ? (typeof value.from === 'string' ? value.from : accountToString(value.from)) : 'Unknown';
+                to = value.to ? (typeof value.to === 'string' ? value.to : accountToString(value.to)) : 'Unknown';
+                amount = value.amount ? (Array.isArray(value.amount) ? value.amount[0] : value.amount) : '0';
+                break;
+              }
+            }
           }
         }
         break;
@@ -129,12 +164,20 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions, token
       'transfer': 'text-green-600',
       'burn': 'text-red-600',
       'approve': 'text-blue-600',
-      'mint': 'text-purple-600'
+      'mint': 'text-purple-600',
+      'Transfer': 'text-green-600',  // 添加大写版本
+      'Burn': 'text-red-600',
+      'Approve': 'text-blue-600',
+      'Mint': 'text-purple-600'
     };
     
+    // 处理大小写
+    const normalizedKind = kind?.toLowerCase() || 'unknown';
+    const displayKind = normalizedKind.charAt(0).toUpperCase() + normalizedKind.slice(1);
+    
     return (
-      <span className={`text-xs font-medium ${typeStyles[kind] || 'text-gray-600'}`}>
-        {kind.charAt(0).toUpperCase() + kind.slice(1)}
+      <span className={`text-xs font-medium ${typeStyles[kind] || typeStyles[normalizedKind] || 'text-gray-600'}`}>
+        {displayKind}
       </span>
     );
   };

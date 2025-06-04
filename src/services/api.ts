@@ -74,9 +74,9 @@ export class ApiService {
   // 获取交易数量
   static async getTxCount(token?: string): Promise<number> {
     const params = token ? { token } : {};
-    const response = await apiClient.get<ApiResponse<number>>('/tx_count', { params });
+    const response = await apiClient.get<ApiResponse<{ count: number; token: string; token_name: string }>>('/tx_count', { params });
     if (response.data.code === 200 && response.data.data !== null) {
-      return response.data.data;
+      return response.data.data.count;
     }
     throw new Error(response.data.error || 'Failed to fetch transaction count');
   }
@@ -102,8 +102,12 @@ export class ApiService {
   }
 
   // 获取账户的交易列表
-  static async getAccountTransactions(account: string, token?: string): Promise<{ transactions: Transaction[] }> {
-    const params = token ? { token } : {};
+  static async getAccountTransactions(account: string, token?: string, limit: number = 50, skip: number = 0): Promise<{ transactions: Transaction[] }> {
+    const params = { 
+      ...(token && { token }),
+      limit,
+      skip
+    };
     const response = await apiClient.get<ApiResponse<{ transactions: Transaction[] }>>(`/transactions/${account}`, { params });
     if (response.data.code === 200 && response.data.data) {
       return response.data.data;

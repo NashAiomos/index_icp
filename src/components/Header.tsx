@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { FiSearch } from 'react-icons/fi';
+import { Link } from 'react-router-dom';
 
 interface HeaderProps {
   onSearch?: (query: string) => void;
@@ -17,13 +18,20 @@ const Header: React.FC<HeaderProps> = ({ onSearch, isDark }) => {
   };
 
   return (
-    <header className={`${isDark ? 'bg-dark-bg border-dark-border' : 'bg-white border-gray-200'} border-b`}>
-      <div className="container mx-auto px-4">
+    <header className={`${isDark ? 'bg-dark-bg border-dark-border' : 'border-gray-200'}`}>
+      <div className="container mx-auto" style={{ padding: '0 3rem' }}>
         <div className="flex items-center justify-between">
 
           {/* Logo */}
           <div className="flex items-center">
-            <img src="/logo.svg" alt="Vly Explorer" style={{ height: '5rem' }} className="w-auto" />
+            <Link to="/" className="cursor-pointer">
+              <img 
+                src="/logo.svg" 
+                alt="Vly Explorer" 
+                style={{ height: '5rem' }} 
+                className="w-auto hover:opacity-70 transition-opacity" 
+              />
+            </Link>
           </div>
 
             {/* Search Bar */}
