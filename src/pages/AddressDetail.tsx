@@ -287,11 +287,6 @@ const AddressDetail: React.FC = () => {
     };
   }, [clearNewFlags]);
 
-  const handleSearch = (query: string) => {
-    // TODO: 实现搜索功能
-    console.log('Search query:', query);
-  };
-
   // 格式化余额显示
   const formatBalance = (balance: AccountBalance | null) => {
     if (!balance) return '0';
@@ -338,7 +333,7 @@ const AddressDetail: React.FC = () => {
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-dark-bg' : 'bg-gray-50'}`}>
-      <Header onSearch={handleSearch} isDark={isDark} />
+      <Header isDark={isDark} />
       
       <main className="container mx-auto" style={{ padding: '1rem 3rem' }}>
         {/* 返回按钮 */}

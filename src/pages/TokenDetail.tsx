@@ -23,7 +23,6 @@ import { Transaction } from '../types';
 import { useTheme } from '../hooks/useTheme';
 import { useAutoRefreshTransactions } from '../hooks/useAutoRefreshTransactions';
 import { useGlobalCache } from '../contexts/GlobalCacheContext';
-import { FiSearch } from 'react-icons/fi';
 
 const TokenDetail: React.FC = () => {
   const { symbol } = useParams<{ symbol: string }>();
@@ -31,7 +30,6 @@ const TokenDetail: React.FC = () => {
   const isDark = useTheme();
   const { getTokenStats, getToken, data: cacheData } = useGlobalCache();
   const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
   
   // 处理symbol映射：vUSD -> VUSD
   const apiSymbol = symbol === 'vUSD' ? 'VUSD' : symbol || '';
@@ -114,17 +112,6 @@ const TokenDetail: React.FC = () => {
     };
   }, [clearNewFlags]);
 
-  // 处理点击logo的逻辑
-  const handleLogoClick = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    navigate('/');
-  }, [navigate]);
-
-  const handleSearch = (query: string) => {
-    // TODO: 实现搜索功能
-    console.log('Search query:', query);
-  };
-
   // 根据symbol获取对应的logo路径
   const getLogoPath = (symbol: string) => {
     if (symbol === 'LIKE') {
@@ -147,44 +134,7 @@ const TokenDetail: React.FC = () => {
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-dark-bg' : 'bg-gray-50'}`}>
-      <header className={`${isDark ? 'bg-dark-bg border-dark-border' : 'border-gray-200'}`}>
-        <div className="container mx-auto" style={{ padding: '0 3rem' }}>
-          <div className="flex items-center justify-between">
-            {/* Logo with data passing */}
-            <div className="flex items-center">
-              <div 
-                onClick={handleLogoClick}
-                className="cursor-pointer no-preload"
-              >
-                <img 
-                  src="/logo.svg" 
-                  alt="Vly Explorer" 
-                  style={{ height: '5rem' }} 
-                  className="w-auto hover:opacity-70 transition-opacity" 
-                />
-              </div>
-            </div>
-
-            {/* Search Bar */}
-            <form onSubmit={(e) => { e.preventDefault(); handleSearch(searchQuery); }} className="max-w-xl w-full md:w-96">
-              <div className="relative">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search"
-                  className={`w-full ${isDark
-                      ? 'bg-dark-card border-dark-border text-white placeholder-gray-500'
-                      : 'bg-gray-50 border-gray-300 text-gray-900 placeholder-gray-400'
-                    } border rounded-lg py-2.5 px-4 pl-10 focus:outline-none focus:border-primary-blue transition-colors`}
-                />
-                <FiSearch className={`absolute left-3 top-1/2 transform -translate-y-1/2 ${isDark ? 'text-gray-500' : 'text-gray-400'
-                  } text-lg`} />
-              </div>
-            </form>
-          </div>
-        </div>
-      </header>
+      <Header isDark={isDark} />
       
       <main className="container mx-auto" style={{ padding: '1rem 3rem' }}>
         {error && (

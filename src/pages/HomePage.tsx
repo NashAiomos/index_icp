@@ -131,11 +131,6 @@ const HomePage: React.FC = () => {
     };
   }, [clearNewFlags]);
 
-  const handleSearch = (query: string) => {
-    // TODO: 实现搜索功能
-    console.log('Search query:', query);
-  };
-
   // 创建代币映射表
   const tokenMap: { [key: string]: { symbol: string; decimals: number } } = {};
   cacheData.tokens.forEach(token => {
@@ -153,7 +148,7 @@ const HomePage: React.FC = () => {
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-dark-bg' : 'bg-gray-50'}`}>
-      <Header onSearch={handleSearch} isDark={isDark} />
+      <Header isDark={isDark} />
       
       <main className="container mx-auto" style={{ padding: '1rem 3rem' }}>
         {error && (
