@@ -7,6 +7,7 @@ import { formatAddress, formatNumber } from '../utils/format';
 import Header from '../components/Header';
 import TransactionTable from '../components/TransactionTable';
 import BackToTopButton from '../components/BackToTopButton';
+import BalanceChartsContainer from '../components/BalanceChartsContainer';
 import { useAutoRefreshTransactions } from '../hooks/useAutoRefreshTransactions';
 
 // 扩展 Transaction 类型，添加代币信息
@@ -460,7 +461,7 @@ const AddressDetail: React.FC = () => {
                   </svg>
                 </div>
                 <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                  Token Holding (2)
+                  Balance
                 </h2>
               </div>
               
@@ -519,6 +520,17 @@ const AddressDetail: React.FC = () => {
               </div>
             </div>
             
+            {/* 余额图表 */}
+            <div className="mt-6">
+              <BalanceChartsContainer 
+                transactions={transactions}
+                likeBalance={likeBalance}
+                vusdBalance={vusdBalance}
+                address={address || ''}
+                isDark={isDark}
+              />
+            </div>
+            
             {/* 交易列表 */}
             {transactions.length > 0 && (
               <div className="mt-6">
@@ -553,7 +565,7 @@ const AddressDetail: React.FC = () => {
                   : 'bg-white border-gray-200 shadow-sm'
               } border rounded-lg p-8 text-center mt-6`}>
                 <div className={isDark ? 'text-gray-400' : 'text-gray-500'}>
-                  该地址暂无交易记录
+                  This address has no transaction records
                 </div>
               </div>
             )}
