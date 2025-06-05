@@ -433,6 +433,17 @@ impl ApiServer {
                 handle_get_transactions_by_range(start, end, params, db, tokens).await
             });
 
+        // 获取所有代币的最新交易
+        let tokens_for_all_latest = self.tokens.clone();
+        let all_tokens_latest_transactions = warp::path!("api" / "all_tokens_latest_transactions")
+            .and(warp::get())
+            .and(warp::query::<QueryParams>())
+            .and(with_db(db_conn.clone()))
+            .and(warp::any().map(move || tokens_for_all_latest.clone()))
+            .and_then(|params, db, tokens| async move {
+                handle_get_all_tokens_latest_transactions(params, db, tokens).await
+            });
+
         // 合并所有路由
         supported_tokens
             .or(balance)
@@ -446,6 +457,7 @@ impl ApiServer {
             .or(active_accounts)
             .or(search)
             .or(transactions_by_range)
+            .or(all_tokens_latest_transactions)
             .boxed()
     }
 }
@@ -1118,6 +1130,64 @@ async fn handle_get_transactions_by_range(
             let response = ApiResponse::<Vec<String>>::error(&e.to_string());
             error!("API响应错误: 获取交易列表 - start: {}, end: {}, error: {}", start, end, e);
             Ok(warp::reply::json(&response))
+        }
+    }
+}
+
+/// 处理函数：获取所有代币的最新交易
+///
+/// # 参数
+/// * `params` - 查询参数，包括limit
+/// * `db_conn` - 数据库连接
+/// * `tokens` - 代币配置列表
+///
+/// # 返回
+/// 成功时返回所有代币的最新交易列表，失败时返回错误信息
+async fn handle_get_all_tokens_latest_transactions(
+    params: QueryParams,
+    db_conn: Arc<DbConnection>,
+    tokens: Vec<crate::models::TokenConfig>,
+) -> Result<impl Reply, Rejection> {
+    info!("API请求: 获取所有代币的最新交易 - limit: {:?}", params.limit);
+    
+    // 设置分页参数
+    let limit = params.limit.map(|l| l.min(500));
+    
+    match api::get_all_tokens_latest_transactions(&db_conn.collections, limit).await {
+        Ok(transactions) => {
+            // 将交易数据转换为可序列化的格式
+            let tx_docs: Vec<Document> = transactions.iter()
+                .map(|(token_symbol, tx)| {
+                    // 找到对应的代币配置
+                    let token_config = tokens.iter()
+                        .find(|t| &t.symbol == token_symbol)
+                        .unwrap_or(&tokens[0]);
+                    
+                    let mut tx_doc = transaction_to_bson(tx, token_symbol, &token_config.name);
+                    // 添加代币信息到交易文档
+                    tx_doc.insert("token", token_symbol);
+                    tx_doc.insert("token_name", &token_config.name);
+                    tx_doc
+                })
+                .collect();
+            
+            let meta = doc! {
+                "total": tx_docs.len() as i32,
+                "limit": limit.unwrap_or(100),
+            };
+            
+            let response_data = doc! {
+                "transactions": tx_docs,
+                "meta": meta
+            };
+            
+            let response = ApiResponse::success(response_data);
+            info!("API响应成功: 获取所有代币的最新交易 - count: {}", transactions.len());
+            Ok(warp::reply::json(&response))
+        },
+        Err(e) => {
+            error!("API响应错误: 获取所有代币的最新交易 - error: {}", e);
+            Err(warp::reject::custom(map_db_error(e)))
         }
     }
 }

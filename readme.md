@@ -326,6 +326,49 @@ cors_enabled = true
   GET /api/latest_transactions?limit=5&token=VUSD
   ```
 
+#### GET /api/all_tokens_latest_transactions
+- 查询参数（可选）：
+  - `limit` (i64)：返回最新交易数，默认 `100`，上限 `500`
+- 描述：获取所有代币的最新交易列表，按时间戳倒序排列。首先从每个代币的集合中获取指定数量的最新交易，然后合并排序返回最新的交易。
+- 示例请求：
+  ```
+  GET /api/all_tokens_latest_transactions?limit=50
+  ```
+- 示例响应（截断）：
+  ```json
+  {
+    "code": 200,
+    "data": {
+      "meta": {
+        "total": 50,
+        "limit": 50
+      },
+      "transactions": [
+        {
+          "index": 25000,
+          "kind": "transfer",
+          "timestamp": 1716342900,
+          "token": "VUSD",
+          "token_name": "VUSD",
+          "from": {...},
+          "to": {...},
+          "amount": "1000000"
+        },
+        {
+          "index": 15432,
+          "kind": "mint",
+          "timestamp": 1716342890,
+          "token": "ICP",
+          "token_name": "Internet Computer",
+          "to": {...},
+          "amount": "50000000"
+        }
+      ]
+    },
+    "error": null
+  }
+  ```
+
 #### GET /api/transactions_by_range/{start}/{end}
 - 路径参数：
   - `start` (u64)：起始索引
