@@ -25,10 +25,10 @@ use std::error::Error;
 use mongodb::Collection;
 use mongodb::bson::{doc, Document};
 use mongodb::options::FindOptions;
-use log::debug;
+use log::{debug, error};
 use crate::models::Transaction;
 use crate::db::balances::normalize_account_id;
-use futures::stream::TryStreamExt;
+use futures::stream::{TryStreamExt, StreamExt};
 use mongodb::options::FindOneOptions;
 use crate::db::supply;
 use crate::db::transactions as tx_db;
@@ -394,3 +394,78 @@ pub async fn get_transactions_by_index_range(
 
     Ok(txs)
 }
+
+/// 获取所有代币的最新交易
+/// 从每个代币集合中获取指定数量的最新交易，然后合并并按时间排序
+///
+/// # 参数
+/// * `collections` - 所有代币的集合映射
+/// * `limit` - 最大返回条数，默认为 100
+///
+/// # 返回
+/// 返回所有代币的最新交易列表，按时间戳降序排列
+pub async fn get_all_tokens_latest_transactions(
+    collections: &std::collections::HashMap<String, crate::db::TokenCollections>,
+    limit: Option<i64>,
+) -> Result<Vec<(String, Transaction)>, Box<dyn Error>> {
+    let limit_val = limit.unwrap_or(100).min(500); // 最多返回500条
+    debug!("获取所有代币的最新 {} 条交易", limit_val);
+    
+    // 为了确保能获取到足够的交易，每个代币获取 limit 条
+    let per_token_limit = limit_val;
+    
+    let mut all_transactions: Vec<(String, Transaction)> = Vec::new();
+    
+    // 遍历所有代币集合
+    for (token_symbol, token_collections) in collections {
+        debug!("获取代币 {} 的最新交易", token_symbol);
+        
+        let options = FindOptions::builder()
+            .sort(doc! { "index": -1 })
+            .limit(per_token_limit)
+            .build();
+        
+        match token_collections.tx_col.find(doc! {}, options).await {
+            Ok(mut cursor) => {
+                // 收集该代币的交易
+                let mut token_transactions = Vec::new();
+                while let Some(result) = cursor.next().await {
+                    match result {
+                        Ok(doc) => {
+                            if let Ok(transaction) = mongodb::bson::from_document::<Transaction>(doc) {
+                                token_transactions.push((token_symbol.clone(), transaction));
+                            }
+                        }
+                        Err(e) => {
+                            error!("解析代币 {} 的交易文档失败: {}", token_symbol, e);
+                        }
+
+                    }
+
+                }
+                debug!("代币 {} 获取了 {} 条交易", token_symbol, token_transactions.len());
+                all_transactions.extend(token_transactions);
+            }
+            Err(e) => {
+                error!("查询代币 {} 的交易失败: {}", token_symbol, e);
+            }
+        }
+    }
+    
+    // 按时间戳降序排序（最新的在前）
+    all_transactions.sort_by(|a, b| {
+        let ts_a = a.1.timestamp;
+        let ts_b = b.1.timestamp;
+        ts_b.cmp(&ts_a)
+    });
+    
+    // 截取指定数量的交易
+    if all_transactions.len() as i64 > limit_val {
+        all_transactions.truncate(limit_val as usize);
+    }
+    
+    debug!("返回 {} 条合并后的交易", all_transactions.len());
+    Ok(all_transactions)
+}
+
+
