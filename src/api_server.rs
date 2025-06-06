@@ -444,6 +444,28 @@ impl ApiServer {
                 handle_get_all_tokens_latest_transactions(params, db, tokens).await
             });
 
+        // 获取账户交易总数
+        let tokens_for_account_tx_count = self.tokens.clone();
+        let account_tx_count = warp::path!("api" / "account_tx_count" / String)
+            .and(warp::get())
+            .and(warp::query::<QueryParams>())
+            .and(with_db(db_conn.clone()))
+            .and(warp::any().map(move || tokens_for_account_tx_count.clone()))
+            .and_then(|account, params, db, tokens| async move {
+                handle_get_account_transaction_count(account, params, db, tokens).await
+            });
+
+        // 获取账户第一笔交易
+        let tokens_for_first_tx = self.tokens.clone();
+        let account_first_transaction = warp::path!("api" / "account_first_transaction" / String)
+            .and(warp::get())
+            .and(warp::query::<QueryParams>())
+            .and(with_db(db_conn.clone()))
+            .and(warp::any().map(move || tokens_for_first_tx.clone()))
+            .and_then(|account, params, db, tokens| async move {
+                handle_get_account_first_transaction(account, params, db, tokens).await
+            });
+
         // 合并所有路由
         supported_tokens
             .or(balance)
@@ -458,6 +480,8 @@ impl ApiServer {
             .or(search)
             .or(transactions_by_range)
             .or(all_tokens_latest_transactions)
+            .or(account_tx_count)
+            .or(account_first_transaction)
             .boxed()
     }
 }
@@ -1138,7 +1162,6 @@ async fn handle_get_transactions_by_range(
 ///
 /// # 参数
 /// * `params` - 查询参数，包括limit
-/// * `db_conn` - 数据库连接
 /// * `tokens` - 代币配置列表
 ///
 /// # 返回
@@ -1187,6 +1210,120 @@ async fn handle_get_all_tokens_latest_transactions(
         },
         Err(e) => {
             error!("API响应错误: 获取所有代币的最新交易 - error: {}", e);
+            Err(warp::reject::custom(map_db_error(e)))
+        }
+    }
+}
+
+/// 处理函数：获取指定账户的交易总数
+///
+/// # 参数
+/// * `account` - 账户地址
+/// * `params` - 查询参数，包括可选的token
+/// * `tokens` - 代币配置列表
+///
+/// # 返回
+/// 成功时返回账户的交易总数，失败时返回错误信息
+async fn handle_get_account_transaction_count(
+    account: String,
+    params: QueryParams,
+    db_conn: Arc<DbConnection>,
+    tokens: Vec<crate::models::TokenConfig>,
+) -> Result<impl Reply, Rejection> {
+    info!("API请求: 获取账户交易总数 - account: {}, token: {:?}", account, params.token);
+    
+    // 获取查询参数中的token或者默认第一个代币
+    let token = find_token(&tokens, params.token.as_deref())?;
+    debug!("使用代币: {}", token.symbol);
+    
+    // 从数据库中获取该代币的集合
+    let collections = db_conn.collections.get(&token.symbol)
+        .ok_or_else(|| warp::reject::custom(
+            ApiError::TokenError(format!("未找到代币 {} 的数据库集合", token.symbol))
+        ))?;
+    
+    match api::get_account_transaction_count(&collections.accounts_col, &account).await {
+        Ok(count) => {
+            let response_data = doc! {
+                "account": account.clone(),
+                "token": token.symbol.clone(),
+                "transaction_count": count as i64
+            };
+            
+            let response = ApiResponse::success(response_data);
+            info!("API响应成功: 获取账户交易总数 - account: {}, count: {}, token: {}", 
+                 account, count, token.symbol);
+            Ok(warp::reply::json(&response))
+        },
+        Err(e) => {
+            error!("API响应错误: 获取账户交易总数 - account: {}, error: {}", account, e);
+            Err(warp::reject::custom(map_db_error(e)))
+        }
+    }
+}
+
+/// 处理函数：获取指定账户的第一笔交易信息
+///
+/// # 参数
+/// * `account` - 账户地址
+/// * `params` - 查询参数，包括可选的token
+/// * `db_conn` - 数据库连接
+/// * `tokens` - 代币配置列表
+///
+/// # 返回
+/// 成功时返回账户的第一笔交易信息，失败时返回错误信息
+async fn handle_get_account_first_transaction(
+    account: String,
+    params: QueryParams,
+    db_conn: Arc<DbConnection>,
+    tokens: Vec<crate::models::TokenConfig>,
+) -> Result<impl Reply, Rejection> {
+    info!("API请求: 获取账户第一笔交易 - account: {}, token: {:?}", account, params.token);
+    
+    // 获取查询参数中的token或者默认第一个代币
+    let token = find_token(&tokens, params.token.as_deref())?;
+    debug!("使用代币: {}", token.symbol);
+    
+    // 从数据库中获取该代币的集合
+    let collections = db_conn.collections.get(&token.symbol)
+        .ok_or_else(|| warp::reject::custom(
+            ApiError::TokenError(format!("未找到代币 {} 的数据库集合", token.symbol))
+        ))?;
+    
+    match api::get_account_first_transaction(&collections.accounts_col, &collections.tx_col, &account).await {
+        Ok(transaction) => {
+            match transaction {
+                Some(tx) => {
+                    // 将Transaction对象转换为可序列化的文档
+                    let tx_doc = transaction_to_bson(&tx, &token.symbol, &token.name);
+                    
+                    let response_data = doc! {
+                        "account": account.clone(),
+                        "token": token.symbol.clone(),
+                        "first_transaction": tx_doc
+                    };
+                    
+                    let response = ApiResponse::success(response_data);
+                    info!("API响应成功: 获取账户第一笔交易 - account: {}, token: {}, tx_index: {:?}", 
+                         account, token.symbol, tx.index);
+                    Ok(warp::reply::json(&response))
+                },
+                None => {
+                    let response_data = doc! {
+                        "account": account.clone(),
+                        "token": token.symbol.clone(),
+                        "first_transaction": mongodb::bson::Bson::Null
+                    };
+                    
+                    let response = ApiResponse::success(response_data);
+                    info!("API响应成功: 获取账户第一笔交易 - account: {}, token: {}, 未找到交易", 
+                         account, token.symbol);
+                    Ok(warp::reply::json(&response))
+                }
+            }
+        },
+        Err(e) => {
+            error!("API响应错误: 获取账户第一笔交易 - account: {}, error: {}", account, e);
             Err(warp::reject::custom(map_db_error(e)))
         }
     }

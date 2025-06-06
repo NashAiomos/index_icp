@@ -468,4 +468,80 @@ pub async fn get_all_tokens_latest_transactions(
     Ok(all_transactions)
 }
 
+/// 查询指定账户的交易总数
+pub async fn get_account_transaction_count(
+    accounts_col: &Collection<Document>,
+    account: &str,
+) -> Result<u64, Box<dyn Error>> {
+    let normalized_account = normalize_account_id(account);
+    debug!("查询账户 {} 的交易总数", normalized_account);
+    
+    // 从账户集合获取交易索引列表
+    let account_doc = match accounts_col
+        .find_one(doc! { "account": &normalized_account }, None)
+        .await?
+    {
+        Some(doc) => doc,
+        None => return Ok(0), // 账户不存在，返回0
+    };
+    
+    let indices = match account_doc.get_array("transaction_indices") {
+        Ok(indices) => indices.clone(),
+        Err(_) => return Ok(0), // 没有交易记录，返回0
+    };
+    
+    Ok(indices.len() as u64)
+}
+
+/// 查询指定账户的第一笔交易信息
+pub async fn get_account_first_transaction(
+    accounts_col: &Collection<Document>,
+    tx_col: &Collection<Document>,
+    account: &str,
+) -> Result<Option<Transaction>, Box<dyn Error>> {
+    let normalized_account = normalize_account_id(account);
+    debug!("查询账户 {} 的第一笔交易", normalized_account);
+    
+    // 从账户集合获取交易索引列表
+    let account_doc = match accounts_col
+        .find_one(doc! { "account": &normalized_account }, None)
+        .await?
+    {
+        Some(doc) => doc,
+        None => return Ok(None), // 账户不存在，返回None
+    };
+    
+    let indices = match account_doc.get_array("transaction_indices") {
+        Ok(indices) => indices.clone(),
+        Err(_) => return Ok(None), // 没有交易记录，返回None
+    };
+    
+    if indices.is_empty() {
+        return Ok(None);
+    }
+    
+    // 将BSON数组转换为i64数组，并找到最小的索引（第一笔交易）
+    let tx_indices: Vec<i64> = indices.iter()
+        .filter_map(|idx| idx.as_i64())
+        .collect();
+    
+    if tx_indices.is_empty() {
+        return Ok(None);
+    }
+    
+    // 找到最小的交易索引（第一笔交易）
+    let first_tx_index = *tx_indices.iter().min().unwrap();
+    
+    // 根据索引查询交易详情
+    let tx_doc = tx_col.find_one(doc! { "index": first_tx_index }, None).await?;
+    
+    match tx_doc {
+        Some(doc) => {
+            let transaction: Transaction = mongodb::bson::from_document(doc)?;
+            Ok(Some(transaction))
+        },
+        None => Ok(None),
+    }
+}
+
 
