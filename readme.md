@@ -389,8 +389,8 @@ cors_enabled = true
   - `account` (String)：账户标识，格式 `owner` 或 `owner:subaccount`
 - 查询参数（可选）：
   - `token` (String)：代币符号，默认为配置的第一个代币
-  - `start_time` (u64)：开始时间戳（秒）
-  - `end_time` (u64)：结束时间戳（秒）
+  - `start_time` (u64)：开始时间戳（纳秒）
+  - `end_time` (u64)：结束时间戳（纳秒）
   - `limit` (i64)：返回记录数量，默认 `100`
   - `skip` (i64)：跳过记录数，用于分页，默认 `0`
   - `sort` (String)：排序方式，`asc` 或 `desc`，默认 `desc`
