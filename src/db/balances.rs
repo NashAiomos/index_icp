@@ -95,6 +95,7 @@ pub async fn calculate_all_balances(
     balances_col: &Collection<Document>,
     supply_col: &Collection<Document>,
     anomalies_col: &Collection<Document>,
+    balance_history_col: &Collection<Document>,
     token_config: &crate::models::TokenConfig,
 ) -> Result<(u64, u64), Box<dyn Error>> {
     // 获取代币小数位数，默认为8
@@ -104,6 +105,9 @@ pub async fn calculate_all_balances(
     
     // 首先清空余额集合
     clear_balances(balances_col).await?;
+    
+    // 清空余额历史集合（全量计算时重新生成）
+    crate::db::balance_history::clear_balance_history(balance_history_col).await?;
     
     // 查询所有账户
     let mut accounts_cursor = accounts_col.find(doc! {}, None).await?;
@@ -152,7 +156,7 @@ pub async fn calculate_all_balances(
         }
         
         // 计算该账户的余额
-        match calculate_account_balance(&account, &tx_indices, tx_col, token_config, anomalies_col).await {
+        match calculate_account_balance(&account, &tx_indices, tx_col, token_config, anomalies_col, balance_history_col).await {
             Ok((balance, has_anomalies)) => {
                 // 更新余额记录
                 match save_account_balance(balances_col, &account, &balance).await {
@@ -194,6 +198,7 @@ pub async fn calculate_incremental_balances(
     balances_col: &Collection<Document>,
     supply_col: &Collection<Document>,
     anomalies_col: &Collection<Document>,
+    balance_history_col: &Collection<Document>,
     token_config: &crate::models::TokenConfig,
 ) -> Result<(u64, u64), Box<dyn Error>> {
     // 获取代币小数位数，默认为8
@@ -309,7 +314,7 @@ pub async fn calculate_incremental_balances(
         }
         
         // 计算该账户的余额
-        match calculate_account_balance(&account, &tx_indices, tx_col, token_config, anomalies_col).await {
+        match calculate_account_balance(&account, &tx_indices, tx_col, token_config, anomalies_col, balance_history_col).await {
             Ok((balance, has_anomalies)) => {
                 // 更新余额记录
                 match save_account_balance(balances_col, &account, &balance).await {
@@ -349,6 +354,7 @@ pub async fn calculate_account_balance(
     tx_col: &Collection<Document>,
     token_config: &crate::models::TokenConfig,
     anomalies_col: &Collection<Document>,
+    balance_history_col: &Collection<Document>,
 ) -> Result<(Nat, bool), Box<dyn Error>> {
     // 获取代币小数位数，默认为8
     let _token_decimals = token_config.decimals.unwrap_or(8);
@@ -434,6 +440,11 @@ pub async fn calculate_account_balance(
         let _principal_id = account_parts[0];
         let _subaccount_hex = if account_parts.len() > 1 { Some(account_parts[1]) } else { None };
         
+        // 记录变化前的余额
+        let balance_before = balance.clone();
+        let mut balance_changed = false;
+        let mut tx_type_for_history = String::new();
+        
         // 根据交易类型和账户角色计算余额变化
         match tx.kind.as_str() {
             "transfer" => {
@@ -454,6 +465,9 @@ pub async fn calculate_account_balance(
                     
                     // 如果是发送方，减少余额
                     if is_from {
+                        balance_changed = true;
+                        tx_type_for_history = "transfer_out".to_string();
+                        
                         // 先创建错误消息，避免借用冲突
                         let error_msg = format!("账户 {} 的余额不足，当前余额: {}, 转账金额: {}", 
                                               normalized_account, balance.0, transfer.amount.0);
@@ -492,6 +506,8 @@ pub async fn calculate_account_balance(
                     
                     // 如果是接收方，增加余额
                     if is_to {
+                        balance_changed = true;
+                        tx_type_for_history = "transfer_in".to_string();
                         balance = balance + transfer.amount.clone();
                     }
                     
@@ -508,6 +524,8 @@ pub async fn calculate_account_balance(
                     
                     // 如果是接收方，增加余额
                     if account_match(&to_account, &normalized_account) {
+                        balance_changed = true;
+                        tx_type_for_history = "mint".to_string();
                         balance = balance + mint.amount.clone();
                     }
                 }
@@ -525,6 +543,9 @@ pub async fn calculate_account_balance(
                     
                     // 如果是发送方，减少余额
                     if account_match(&from_account, &normalized_account) {
+                        balance_changed = true;
+                        tx_type_for_history = "burn".to_string();
+                        
                         let error_msg = format!("账户 {} 的余额不足，当前余额: {}, 销毁金额: {}", 
                                               normalized_account, balance.0, burn.amount.0);
                         if let Ok(anomaly) = safe_subtract_balance_with_logging(
@@ -556,6 +577,9 @@ pub async fn calculate_account_balance(
                     if account_match(&from_account, &normalized_account) {
                         if let Some(ref fee) = approve.fee {
                             if !fee.0.is_zero() {
+                                balance_changed = true;
+                                tx_type_for_history = "approve_fee".to_string();
+                                
                                 let fee_error_msg = format!("账户 {} 的余额不足以支付授权手续费，当前余额: {}, 手续费: {}", 
                                                          normalized_account, balance.0, fee.0);
                                 if let Ok(anomaly) = safe_subtract_balance_with_logging(
@@ -580,6 +604,21 @@ pub async fn calculate_account_balance(
             },
             _ => {
                 warn!("未知交易类型: {}, 跳过余额计算 (索引:{})", tx.kind, tx.index.unwrap_or(0));
+            }
+        }
+        
+        // 如果余额发生了变化，记录到余额历史
+        if balance_changed {
+            if let Err(e) = crate::db::balance_history::save_balance_history(
+                balance_history_col,
+                &normalized_account,
+                tx_index,
+                &tx_type_for_history,
+                &balance_before,
+                &balance,
+                tx.timestamp,
+            ).await {
+                error!("记录余额历史失败: {}", e);
             }
         }
         

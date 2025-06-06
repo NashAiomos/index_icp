@@ -6,6 +6,7 @@
 
 - 同步区块链交易数据
 - 计算账户余额
+- 记录余额变化历史，支持精确的余额变化追踪
 - 提供 RESTful API 接口查询交易和账户信息
 - 支持增量同步和全量重置
 - 支持归档数据同步
@@ -28,6 +29,7 @@ src/
 │   ├── transactions.rs  # 交易数据库操作
 │   ├── accounts.rs      # 账户数据库操作
 │   ├── balances.rs      # 余额数据库操作
+│   ├── balance_history.rs # 余额历史数据库操作
 │   ├── supply.rs        # 总供应量数据库操作
 │   └── sync_status.rs   # 同步状态数据库操作
 └── sync/                # 同步功能
@@ -46,10 +48,11 @@ src/
 3. **balances**: 存储每个账户的最新余额信息
 4. **total_supply**: 记录代币的总供应量
 5. **balance_anomalies**: 记录余额计算过程中的异常情况
+6. **balance_history**: 记录每个账户的余额变化历史
 
 此外，系统还维护一个全局集合：
 
-6. **sync_status**: 保存各代币的同步状态，支持增量同步
+7. **sync_status**: 保存各代币的同步状态，支持增量同步
 
 ## 构建与运行
 
@@ -152,15 +155,24 @@ cors_enabled = true
    
    针对每笔交易，程序会实时更新相关账户的余额状态，支持转账、铸币、销毁和授权等操作。
 
-6. **定时增量同步**
+6. **余额变化历史记录**
+   
+   程序在计算余额时会自动记录每笔交易对账户余额的影响，包括：
+   - 交易前后的余额数值
+   - 余额变化量（带正负号）
+   - 交易类型和时间戳
+   - 支持时间范围查询和分页浏览
+   - 可用于绘制精确的余额变化图表
+
+7. **定时增量同步**
    
    每 5 秒自动检查一次主账本是否有新交易，并同步到数据库中。
 
-7. **同步状态保存**
+8. **同步状态保存**
    
    程序为每个代币保存同步状态，确保重启后能从上次同步点继续，避免重复处理交易。
 
-8. **完善的日志记录**
+9. **完善的日志记录**
    
    支持多级别、多目标的日志记录，方便监控和问题排查。控制台仅显示重要信息，详细日志保存到文件。
 
@@ -367,6 +379,79 @@ cors_enabled = true
       "account": "5667a-dzhlm-w6u3z-fq2o5-lmjho-yrkdy-idhr6-6n3jx-gg4u7-fmbqg-4qe",
       "token": "VUSD",
       "first_transaction": null
+    },
+    "error": null
+  }
+  ```
+
+#### GET /api/balance_history/{account}
+- 路径参数：
+  - `account` (String)：账户标识，格式 `owner` 或 `owner:subaccount`
+- 查询参数（可选）：
+  - `token` (String)：代币符号，默认为配置的第一个代币
+  - `start_time` (u64)：开始时间戳（秒）
+  - `end_time` (u64)：结束时间戳（秒）
+  - `limit` (i64)：返回记录数量，默认 `100`
+  - `skip` (i64)：跳过记录数，用于分页，默认 `0`
+  - `sort` (String)：排序方式，`asc` 或 `desc`，默认 `desc`
+- 描述：查询指定账户的余额变化历史记录，包括每笔交易对余额的影响、交易时间和类型
+- 示例请求：
+  ```
+  GET /api/balance_history/ryjl3-tyaaa-aaaaa-aaaba-cai?limit=10&token=VUSD
+  ```
+- 示例响应：
+  ```json
+  {
+    "code": 200,
+    "data": {
+      "account": "ryjl3-tyaaa-aaaaa-aaaba-cai",
+      "token": "VUSD",
+      "total": 10,
+      "history": [
+        {
+          "account": "ryjl3-tyaaa-aaaaa-aaaba-cai",
+          "tx_index": 12345,
+          "tx_type": "transfer_in",
+          "balance_before": "1000000000",
+          "balance_after": "1500000000",
+          "balance_change": "+500000000",
+          "timestamp": 1700050000,
+          "datetime": "2023-11-15T12:00:00Z",
+          "created_at": 1700050001,
+          "token": "VUSD",
+          "token_name": "Internet Computer",
+          "decimals": 8
+        }
+      ]
+    },
+    "error": null
+  }
+  ```
+
+#### GET /api/balance_stats/{account}
+- 路径参数：
+  - `account` (String)：账户标识，格式 `owner` 或 `owner:subaccount`
+- 查询参数（可选）：
+  - `token` (String)：代币符号，默认为配置的第一个代币
+- 描述：查询指定账户的余额历史统计信息，包括总记录数、时间范围、初始和当前余额
+- 示例请求：
+  ```
+  GET /api/balance_stats/ryjl3-tyaaa-aaaaa-aaaba-cai?token=VUSD
+  ```
+- 示例响应：
+  ```json
+  {
+    "code": 200,
+    "data": {
+      "account": "ryjl3-tyaaa-aaaaa-aaaba-cai",
+      "token": "VUSD",
+      "token_name": "VUSD",
+      "decimals": 8,
+      "total_records": 156,
+      "first_record_time": 1699000000,
+      "last_record_time": 1700100000,
+      "initial_balance": "0",
+      "current_balance": "1500000000"
     },
     "error": null
   }

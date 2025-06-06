@@ -323,6 +323,28 @@ impl ApiServer {
                 handle_get_balance(account, params, db, tokens).await
             });
 
+        // 获取账户余额历史
+        let tokens_for_balance_history = self.tokens.clone();
+        let balance_history = warp::path!("api" / "balance_history" / String)
+            .and(warp::get())
+            .and(warp::query::<crate::models::BalanceHistoryQuery>())
+            .and(with_db(db_conn.clone()))
+            .and(warp::any().map(move || tokens_for_balance_history.clone()))
+            .and_then(|account, params, db, tokens| async move {
+                handle_get_balance_history(account, params, db, tokens).await
+            });
+
+        // 获取账户余额历史统计
+        let tokens_for_balance_stats = self.tokens.clone();
+        let balance_stats = warp::path!("api" / "balance_stats" / String)
+            .and(warp::get())
+            .and(warp::query::<QueryParams>())
+            .and(with_db(db_conn.clone()))
+            .and(warp::any().map(move || tokens_for_balance_stats.clone()))
+            .and_then(|account, params, db, tokens| async move {
+                handle_get_balance_stats(account, params, db, tokens).await
+            });
+
         // 获取账户交易历史
         let tokens_for_transactions = self.tokens.clone();
         let transactions = warp::path!("api" / "transactions" / String)
@@ -469,6 +491,8 @@ impl ApiServer {
         // 合并所有路由
         supported_tokens
             .or(balance)
+            .or(balance_history)
+            .or(balance_stats)
             .or(transactions)
             .or(transaction)
             .or(latest_transactions)
@@ -1325,6 +1349,130 @@ async fn handle_get_account_first_transaction(
         Err(e) => {
             error!("API响应错误: 获取账户第一笔交易 - account: {}, error: {}", account, e);
             Err(warp::reject::custom(map_db_error(e)))
+        }
+    }
+}
+
+/// 处理获取账户余额历史的请求
+/// 
+/// # 参数
+/// * `account` - 账户地址
+/// * `params` - 查询参数（时间范围、分页等）
+/// * `db_conn` - 数据库连接
+/// * `tokens` - 代币配置列表
+/// 
+/// # 返回
+/// 账户的余额变化历史记录
+async fn handle_get_balance_history(
+    account: String,
+    params: crate::models::BalanceHistoryQuery,
+    db_conn: Arc<DbConnection>,
+    tokens: Vec<crate::models::TokenConfig>,
+) -> Result<impl Reply, Rejection> {
+    // 从查询参数中提取代币符号（如果有）
+    let token_symbol = params.token.as_deref();
+    
+    // 查找代币
+    let token_config = find_token(&tokens, token_symbol)?;
+    
+    // 获取代币的集合
+    let collections = db_conn.collections.get(&token_config.symbol)
+        .ok_or_else(|| warp::reject::custom(ApiError::NotFound(
+            format!("未找到代币 {} 的集合", token_config.symbol)
+        )))?;
+    
+    // 规范化账户格式
+    let normalized_account = crate::db::balances::normalize_account_id(&account);
+    
+    match crate::db::balance_history::get_balance_history(
+        &collections.balance_history_col,
+        &normalized_account,
+        params.start_time,
+        params.end_time,
+        params.limit,
+        params.skip,
+        params.sort.as_deref(),
+    ).await {
+        Ok(history_docs) => {
+            // 将余额历史记录转换为JSON格式
+            let history_list: Vec<_> = history_docs.into_iter().map(|doc| {
+                // 添加代币信息
+                let mut doc = doc;
+                doc.insert("token", &token_config.symbol);
+                doc.insert("token_name", &token_config.name);
+                doc.insert("decimals", token_config.decimals.unwrap_or(8) as i32);
+                
+                // 将时间戳转换为ISO格式
+                if let Ok(timestamp) = doc.get_i64("timestamp") {
+                    let datetime = chrono::DateTime::from_timestamp(timestamp, 0)
+                        .map(|dt| dt.to_rfc3339())
+                        .unwrap_or_default();
+                    doc.insert("datetime", datetime);
+                }
+                
+                doc
+            }).collect();
+            
+            let response = ApiResponse::success(doc! {
+                "account": normalized_account,
+                "token": &token_config.symbol,
+                "total": history_list.len() as i64,
+                "history": history_list,
+            });
+            Ok(warp::reply::json(&response))
+        },
+        Err(e) => {
+            let error_msg = format!("查询余额历史失败: {}", e);
+            Err(warp::reject::custom(ApiError::Database(error_msg)))
+        }
+    }
+}
+
+/// 处理获取账户余额历史统计的请求
+/// 
+/// # 参数
+/// * `account` - 账户地址
+/// * `params` - 查询参数
+/// * `db_conn` - 数据库连接
+/// * `tokens` - 代币配置列表
+/// 
+/// # 返回
+/// 账户的余额历史统计信息
+async fn handle_get_balance_stats(
+    account: String,
+    params: QueryParams,
+    db_conn: Arc<DbConnection>,
+    tokens: Vec<crate::models::TokenConfig>,
+) -> Result<impl Reply, Rejection> {
+    // 查找代币
+    let token_config = find_token(&tokens, params.token.as_deref())?;
+    
+    // 获取代币的集合
+    let collections = db_conn.collections.get(&token_config.symbol)
+        .ok_or_else(|| warp::reject::custom(ApiError::NotFound(
+            format!("未找到代币 {} 的集合", token_config.symbol)
+        )))?;
+    
+    // 规范化账户格式
+    let normalized_account = crate::db::balances::normalize_account_id(&account);
+    
+    match crate::db::balance_history::get_balance_history_stats(
+        &collections.balance_history_col,
+        &normalized_account,
+    ).await {
+        Ok(mut stats) => {
+            // 添加代币信息
+            stats.insert("account", &normalized_account);
+            stats.insert("token", &token_config.symbol);
+            stats.insert("token_name", &token_config.name);
+            stats.insert("decimals", token_config.decimals.unwrap_or(8) as i32);
+            
+            let response = ApiResponse::success(stats);
+            Ok(warp::reply::json(&response))
+        },
+        Err(e) => {
+            let error_msg = format!("查询余额历史统计失败: {}", e);
+            Err(warp::reject::custom(ApiError::Database(error_msg)))
         }
     }
 }

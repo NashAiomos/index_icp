@@ -277,3 +277,41 @@ pub struct BalanceAnomaly {
     /// 记录时间
     pub timestamp: i64,
 }
+
+/// 账户余额变化记录
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BalanceHistory {
+    /// 账户ID（规范化后的格式）
+    pub account: String,
+    /// 交易索引
+    pub tx_index: u64,
+    /// 交易类型（transfer/mint/burn/approve_fee等）
+    pub tx_type: String,
+    /// 变化前的余额
+    pub balance_before: String,
+    /// 变化后的余额
+    pub balance_after: String,
+    /// 余额变化量（正数表示增加，负数表示减少）
+    pub balance_change: String,
+    /// 交易时间戳
+    pub timestamp: u64,
+    /// 记录创建时间
+    pub created_at: i64,
+}
+
+/// 余额历史查询参数
+#[derive(Debug, Deserialize, Clone)]
+pub struct BalanceHistoryQuery {
+    /// 要查询的代币符号（可选，默认使用配置的第一个代币）
+    pub token: Option<String>,
+    /// 开始时间戳（可选）
+    pub start_time: Option<u64>,
+    /// 结束时间戳（可选）
+    pub end_time: Option<u64>,
+    /// 返回结果的最大条目数（可选，默认100）
+    pub limit: Option<i64>,
+    /// 跳过的条目数，用于分页（可选，默认0）
+    pub skip: Option<i64>,
+    /// 排序方式（asc/desc，默认desc按时间倒序）
+    pub sort: Option<String>,
+}
