@@ -423,6 +423,7 @@ async fn run_application(cfg: models::Config) -> Result<(), Box<dyn Error>> {
                 &collections.balances_col,
                 &collections.total_supply_col,
                 &collections.balance_anomalies_col,
+                &collections.balance_history_col,
                 &token
             ).await {
                 error!("{}: 计算余额时出错: {}", token.symbol, e);
@@ -628,6 +629,7 @@ async fn run_application(cfg: models::Config) -> Result<(), Box<dyn Error>> {
                             &collections.balances_col,
                             &collections.total_supply_col,
                             &collections.balance_anomalies_col,
+                            &collections.balance_history_col,
                             &token
                         ).await {
                             Ok((_s, _e)) => {
@@ -676,6 +678,7 @@ async fn run_application(cfg: models::Config) -> Result<(), Box<dyn Error>> {
                         &collections.balances_col,
                         &collections.total_supply_col,
                         &collections.balance_anomalies_col,
+                        &collections.balance_history_col,
                         &token
                     ).await {
                         Ok((success, error)) => {
