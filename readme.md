@@ -303,6 +303,75 @@ cors_enabled = true
   GET /api/account_count?token=VUSD
   ```
 
+#### GET /api/account_tx_count/{account}
+- 路径参数：
+  - `account` (String)：账户标识，格式 `owner` 或 `owner:subaccount`
+- 查询参数（可选）：
+  - `token` (String)：代币符号，默认为配置的第一个代币
+- 描述：查询指定账户的交易总数
+- 示例请求：
+  ```
+  GET /api/account_tx_count/5667a-dzhlm-w6u3z-fq2o5-lmjho-yrkdy-idhr6-6n3jx-gg4u7-fmbqg-4qe?token=VUSD
+  ```
+- 示例响应：
+  ```json
+  {
+    "code": 200,
+    "data": {
+      "account": "5667a-dzhlm-w6u3z-fq2o5-lmjho-yrkdy-idhr6-6n3jx-gg4u7-fmbqg-4qe",
+      "token": "VUSD",
+      "transaction_count": 25
+    },
+    "error": null
+  }
+  ```
+
+#### GET /api/account_first_transaction/{account}
+- 路径参数：
+  - `account` (String)：账户标识，格式 `owner` 或 `owner:subaccount`
+- 查询参数（可选）：
+  - `token` (String)：代币符号，默认为配置的第一个代币
+- 描述：查询指定账户的第一笔交易信息
+- 示例请求：
+  ```
+  GET /api/account_first_transaction/5667a-dzhlm-w6u3z-fq2o5-lmjho-yrkdy-idhr6-6n3jx-gg4u7-fmbqg-4qe?token=VUSD
+  ```
+- 示例响应：
+  ```json
+  {
+    "code": 200,
+    "data": {
+      "account": "5667a-dzhlm-w6u3z-fq2o5-lmjho-yrkdy-idhr6-6n3jx-gg4u7-fmbqg-4qe",
+      "token": "VUSD",
+      "first_transaction": {
+        "index": 1023,
+        "kind": "transfer",
+        "timestamp": 1716342123,
+        "datetime": "2024-05-22T01:02:03Z",
+        "token": "VUSD",
+        "token_name": "VUSD",
+        "from": "ryjl3-tyaaa-aaaaa-aaaba-cai",
+        "to": "5667a-dzhlm-w6u3z-fq2o5-lmjho-yrkdy-idhr6-6n3jx-gg4u7-fmbqg-4qe",
+        "amount": "1000000",
+        "fee": "10000"
+      }
+    },
+    "error": null
+  }
+  ```
+  如果账户没有交易记录，响应为：
+  ```json
+  {
+    "code": 200,
+    "data": {
+      "account": "5667a-dzhlm-w6u3z-fq2o5-lmjho-yrkdy-idhr6-6n3jx-gg4u7-fmbqg-4qe",
+      "token": "VUSD",
+      "first_transaction": null
+    },
+    "error": null
+  }
+  ```
+
 ### 交易相关
 
 #### GET /api/transaction/{index}
