@@ -56,6 +56,12 @@ backend 是主生产分支；index_multiple_tokens 是同步多个代币分支�
 
 7. **sync_status**: 保存各代币的同步状态，支持增量同步
 
+本地开发：
+
+启动数据库 brew services start mongodb-community
+
+关闭数据库 brew services stop mongodb-community
+
 ## 构建与运行
 
 1. **安装依赖**
