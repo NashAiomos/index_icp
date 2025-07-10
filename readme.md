@@ -16,27 +16,27 @@
 
 ```
 src/
-├── main.rs              # 主程序入口
-├── api.rs               # API 功能模块，包含所有查询功能
-├── api_server.rs        # HTTP API 服务器实现
-├── models.rs            # 数据模型定义
-├── blockchain.rs        # 区块链交互功能
-├── utils.rs             # 通用工具函数
-├── config.rs            # 配置加载功能
-├── error.rs             # 错误处理模块
-├── db/                  # 数据库相关功能
-│   ├── mod.rs           # 数据库模块入口
-│   ├── transactions.rs  # 交易数据库操作
-│   ├── accounts.rs      # 账户数据库操作
-│   ├── balances.rs      # 余额数据库操作
+├── main.rs                # 主程序入口
+├── api.rs                 # API 功能模块，包含所有查询功能
+├── api_server.rs          # HTTP API 服务器实现
+├── models.rs              # 数据模型定义
+├── blockchain.rs          # 区块链交互功能
+├── utils.rs               # 通用工具函数
+├── config.rs              # 配置加载功能
+├── error.rs               # 错误处理模块
+├── db/                    # 数据库相关功能
+│   ├── mod.rs             # 数据库模块入口
+│   ├── transactions.rs    # 交易数据库操作
+│   ├── accounts.rs        # 账户数据库操作
+│   ├── balances.rs        # 余额数据库操作
 │   ├── balance_history.rs # 余额历史数据库操作
-│   ├── supply.rs        # 总供应量数据库操作
-│   └── sync_status.rs   # 同步状态数据库操作
-└── sync/                # 同步功能
-    ├── mod.rs           # 同步模块入口
-    ├── archive.rs       # 归档历史数据
-    ├── ledger.rs        # 账本处理功能
-    └── admin.rs         # 管理员功能（重置等）
+│   ├── supply.rs          # 总供应量数据库操作
+│   └── sync_status.rs     # 同步状态数据库操作
+└── sync/                  # 同步功能
+    ├── mod.rs             # 同步模块入口
+    ├── archive.rs         # 归档历史数据
+    ├── ledger.rs          # 账本处理功能
+    └── admin.rs           # 管理员功能（重置等）
 ```
 
 ## 数据库集合
