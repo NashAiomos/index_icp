@@ -39,6 +39,8 @@ src/
     └── admin.rs           # 管理员功能（重置等）
 ```
 
+backend 是主生产分支；index_multiple_tokens 是同步多个代币分支；index_single_token 是同步单个代币的分支。
+
 ## 数据库集合
 
 程序为每个代币维护以下集合，前缀为代币符号（例如：`ICP_transactions`）：
