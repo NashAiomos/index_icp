@@ -427,7 +427,7 @@ cors_enabled = true
           "datetime": "2023-11-15T12:00:00Z",
           "created_at": 1700050001,
           "token": "VUSD",
-          "token_name": "Internet Computer",
+          "token_name": "VUSD",
           "decimals": 8
         }
       ]
