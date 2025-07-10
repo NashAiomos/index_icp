@@ -264,7 +264,7 @@ async fn run_application(cfg: models::Config) -> Result<(), Box<dyn Error>> {
     }
 
     // 创建索引以提高查询性能
-    create_indexes(&db_conn).await?;
+    create_indexes(&db_conn, &cfg).await?;
 
     // 如果是重置模式，执行完整的数据库重置和重新同步
     if reset_mode && !cfg.tokens.is_empty() {
@@ -273,7 +273,7 @@ async fn run_application(cfg: models::Config) -> Result<(), Box<dyn Error>> {
         let first_token = &cfg.tokens[0];
         // 解析canister ID
         let canister_id = parse_canister_id(&first_token.canister_id)?;
-        reset_and_sync_all_transactions(&agent, &canister_id, &db_conn, first_token).await?;
+        reset_and_sync_all_transactions(&agent, &canister_id, &db_conn, first_token, &cfg).await?;
         info!("数据库重置和重新同步成功完成！");
         return Ok(());
     }
@@ -304,7 +304,7 @@ async fn run_application(cfg: models::Config) -> Result<(), Box<dyn Error>> {
             };
             
             // 调用reset_and_sync_all_transactions函数同步该代币的所有交易
-            match reset_and_sync_all_transactions(&agent, &canister_id, &db_conn, &token).await {
+            match reset_and_sync_all_transactions(&agent, &canister_id, &db_conn, &token, &cfg).await {
                 Ok(_) => {
                     info!("{}: 重置和同步运行成功", token.symbol);
                 },
@@ -424,7 +424,8 @@ async fn run_application(cfg: models::Config) -> Result<(), Box<dyn Error>> {
                 &collections.total_supply_col,
                 &collections.balance_anomalies_col,
                 &collections.balance_history_col,
-                &token
+                &token,
+                &cfg
             ).await {
                 error!("{}: 计算余额时出错: {}", token.symbol, e);
             }
@@ -525,10 +526,11 @@ async fn run_application(cfg: models::Config) -> Result<(), Box<dyn Error>> {
             let db_conn_clone = db_conn.clone();
             let port = api_config.port;
             let tokens_clone = cfg.tokens.clone();
+            let cfg_clone = cfg.clone();
 
             // 创建异步任务启动API服务器
             tokio::spawn(async move {
-                let api_server = api_server::ApiServer::new(db_conn_clone, tokens_clone);
+                let api_server = api_server::ApiServer::new(db_conn_clone, tokens_clone, cfg_clone);
                 if let Err(e) = api_server.start(port).await {
                     log::error!("API服务器启动失败: {}", e);
                 }
@@ -623,7 +625,8 @@ async fn run_application(cfg: models::Config) -> Result<(), Box<dyn Error>> {
                                 &collections.total_supply_col,
                                 &collections.balance_anomalies_col,
                                 &collections.balance_history_col,
-                                &token
+                                &token,
+                                &cfg
                             ).await {
                                 Ok((_s, _e)) => {
                                     if let Some(max_idx) = pending_txs.iter().filter_map(|tx| tx.index).max() {
@@ -672,7 +675,8 @@ async fn run_application(cfg: models::Config) -> Result<(), Box<dyn Error>> {
                             &collections.total_supply_col,
                             &collections.balance_anomalies_col,
                             &collections.balance_history_col,
-                            &token
+                            &token,
+                            &cfg
                         ).await {
                             Ok((success, error)) => {
                                 info!("{}: 增量余额计算完成: 更新了 {} 个账户, 失败 {} 个账户", token.symbol, success, error);

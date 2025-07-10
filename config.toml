@@ -43,3 +43,8 @@ enabled = true
 port = 6017
 # 是否启用CORS支持
 cors_enabled = true
+
+# 是否启用余额历史记录功能
+[balance_history]
+# 如果设置为false，将不会记录账户余额变化历史，可以节约数据库存储空间
+enabled = false

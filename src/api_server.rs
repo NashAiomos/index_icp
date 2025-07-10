@@ -184,6 +184,8 @@ pub struct ApiServer {
     db_conn: Arc<DbConnection>,
     /// 支持的代币配置列表
     tokens: Vec<crate::models::TokenConfig>,
+    /// 应用配置
+    config: Arc<crate::models::Config>,
 }
 
 /// API查询参数
@@ -248,13 +250,15 @@ impl ApiServer {
     /// # 参数
     /// * `db_conn` - 数据库连接实例
     /// * `tokens` - 支持的代币配置列表
+    /// * `config` - 应用配置
     /// 
     /// # 返回
     /// 返回一个新的ApiServer实例
-    pub fn new(db_conn: DbConnection, tokens: Vec<crate::models::TokenConfig>) -> Self {
+    pub fn new(db_conn: DbConnection, tokens: Vec<crate::models::TokenConfig>, config: crate::models::Config) -> Self {
         Self {
             db_conn: Arc::new(db_conn),
             tokens,
+            config: Arc::new(config),
         }
     }
 
@@ -325,24 +329,28 @@ impl ApiServer {
 
         // 获取账户余额历史
         let tokens_for_balance_history = self.tokens.clone();
+        let config_for_balance_history = self.config.clone();
         let balance_history = warp::path!("api" / "balance_history" / String)
             .and(warp::get())
             .and(warp::query::<crate::models::BalanceHistoryQuery>())
             .and(with_db(db_conn.clone()))
             .and(warp::any().map(move || tokens_for_balance_history.clone()))
-            .and_then(|account, params, db, tokens| async move {
-                handle_get_balance_history(account, params, db, tokens).await
+            .and(with_config(config_for_balance_history))
+            .and_then(|account, params, db, tokens, config| async move {
+                handle_get_balance_history(account, params, db, tokens, config).await
             });
 
         // 获取账户余额历史统计
         let tokens_for_balance_stats = self.tokens.clone();
+        let config_for_balance_stats = self.config.clone();
         let balance_stats = warp::path!("api" / "balance_stats" / String)
             .and(warp::get())
             .and(warp::query::<QueryParams>())
             .and(with_db(db_conn.clone()))
             .and(warp::any().map(move || tokens_for_balance_stats.clone()))
-            .and_then(|account, params, db, tokens| async move {
-                handle_get_balance_stats(account, params, db, tokens).await
+            .and(with_config(config_for_balance_stats))
+            .and_then(|account, params, db, tokens, config| async move {
+                handle_get_balance_stats(account, params, db, tokens, config).await
             });
 
         // 获取账户交易历史
@@ -553,6 +561,11 @@ fn find_token<'a>(
 #[allow(dead_code)]
 fn with_tokens(tokens: Vec<crate::models::TokenConfig>) -> impl Filter<Extract = (Vec<crate::models::TokenConfig>,), Error = std::convert::Infallible> + Clone {
     warp::any().map(move || tokens.clone())
+}
+
+/// 提供配置的过滤器
+fn with_config(config: Arc<crate::models::Config>) -> impl Filter<Extract = (Arc<crate::models::Config>,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || config.clone())
 }
 
 /// 处理函数：获取账户余额
@@ -1368,6 +1381,7 @@ async fn handle_get_balance_history(
     params: crate::models::BalanceHistoryQuery,
     db_conn: Arc<DbConnection>,
     tokens: Vec<crate::models::TokenConfig>,
+    config: Arc<crate::models::Config>,
 ) -> Result<impl Reply, Rejection> {
     // 从查询参数中提取代币符号（如果有）
     let token_symbol = params.token.as_deref();
@@ -1386,6 +1400,7 @@ async fn handle_get_balance_history(
     
     match crate::db::balance_history::get_balance_history(
         &collections.balance_history_col,
+        &config,
         &normalized_account,
         params.start_time,
         params.end_time,
@@ -1443,6 +1458,7 @@ async fn handle_get_balance_stats(
     params: QueryParams,
     db_conn: Arc<DbConnection>,
     tokens: Vec<crate::models::TokenConfig>,
+    config: Arc<crate::models::Config>,
 ) -> Result<impl Reply, Rejection> {
     // 查找代币
     let token_config = find_token(&tokens, params.token.as_deref())?;
@@ -1458,6 +1474,7 @@ async fn handle_get_balance_stats(
     
     match crate::db::balance_history::get_balance_history_stats(
         &collections.balance_history_col,
+        &config,
         &normalized_account,
     ).await {
         Ok(mut stats) => {

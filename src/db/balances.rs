@@ -97,6 +97,7 @@ pub async fn calculate_all_balances(
     anomalies_col: &Collection<Document>,
     balance_history_col: &Collection<Document>,
     token_config: &crate::models::TokenConfig,
+    config: &crate::models::Config,
 ) -> Result<(u64, u64), Box<dyn Error>> {
     // 获取代币小数位数，默认为8
     let _token_decimals = token_config.decimals.unwrap_or(8);
@@ -156,7 +157,7 @@ pub async fn calculate_all_balances(
         }
         
         // 计算该账户的余额
-        match calculate_account_balance(&account, &tx_indices, tx_col, token_config, anomalies_col, balance_history_col).await {
+        match calculate_account_balance(&account, &tx_indices, tx_col, token_config, anomalies_col, balance_history_col, config).await {
             Ok((balance, has_anomalies)) => {
                 // 更新余额记录
                 match save_account_balance(balances_col, &account, &balance).await {
@@ -200,6 +201,7 @@ pub async fn calculate_incremental_balances(
     anomalies_col: &Collection<Document>,
     balance_history_col: &Collection<Document>,
     token_config: &crate::models::TokenConfig,
+    config: &crate::models::Config,
 ) -> Result<(u64, u64), Box<dyn Error>> {
     // 获取代币小数位数，默认为8
     let _token_decimals = token_config.decimals.unwrap_or(8);
@@ -314,7 +316,7 @@ pub async fn calculate_incremental_balances(
         }
         
         // 计算该账户的余额
-        match calculate_account_balance(&account, &tx_indices, tx_col, token_config, anomalies_col, balance_history_col).await {
+        match calculate_account_balance(&account, &tx_indices, tx_col, token_config, anomalies_col, balance_history_col, config).await {
             Ok((balance, has_anomalies)) => {
                 // 更新余额记录
                 match save_account_balance(balances_col, &account, &balance).await {
@@ -355,6 +357,7 @@ pub async fn calculate_account_balance(
     token_config: &crate::models::TokenConfig,
     anomalies_col: &Collection<Document>,
     balance_history_col: &Collection<Document>,
+    config: &crate::models::Config,
 ) -> Result<(Nat, bool), Box<dyn Error>> {
     // 获取代币小数位数，默认为8
     let _token_decimals = token_config.decimals.unwrap_or(8);
@@ -611,6 +614,7 @@ pub async fn calculate_account_balance(
         if balance_changed {
             if let Err(e) = crate::db::balance_history::save_balance_history(
                 balance_history_col,
+                config,
                 &normalized_account,
                 tx_index,
                 &tx_type_for_history,

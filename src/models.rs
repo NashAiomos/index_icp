@@ -227,6 +227,7 @@ pub struct Config {
     pub tokens: Vec<TokenConfig>,  // 多代币配置
     pub log: Option<LogConfig>,    // 日志配置
     pub api_server: Option<ApiServerConfig>, // API服务器配置
+    pub balance_history: Option<BalanceHistoryConfig>, // 余额历史记录配置
 }
 
 // API服务器配置结构体
@@ -236,6 +237,12 @@ pub struct ApiServerConfig {
     pub port: u16,           // API服务器监听端口
     #[allow(dead_code)]
     pub cors_enabled: bool,  // 是否启用CORS
+}
+
+// 余额历史记录配置结构体
+#[derive(Debug, Deserialize, Clone)]
+pub struct BalanceHistoryConfig {
+    pub enabled: bool,       // 是否启用余额历史记录功能
 }
 
 // 命令行参数结构体

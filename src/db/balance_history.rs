@@ -10,14 +10,15 @@ use std::error::Error;
 use mongodb::{Collection};
 use mongodb::bson::{doc, Document};
 use mongodb::options::{FindOptions, IndexOptions, FindOneOptions};
-use log::{info, error, debug};
-use crate::models::BalanceHistory;
+use log::{info, error, debug, warn};
+use crate::models::{BalanceHistory, Config};
 use crate::utils::create_error;
 use candid::Nat;
 
 /// 保存余额变化记录
 pub async fn save_balance_history(
     history_col: &Collection<Document>,
+    config: &Config,
     account: &str,
     tx_index: u64,
     tx_type: &str,
@@ -25,6 +26,16 @@ pub async fn save_balance_history(
     balance_after: &Nat,
     timestamp: u64,
 ) -> Result<(), Box<dyn Error>> {
+    // 检查是否启用余额历史记录功能
+    if let Some(balance_history_config) = &config.balance_history {
+        if !balance_history_config.enabled {
+            debug!("余额历史记录功能已禁用，跳过记录账户 {} 的余额变化", account);
+            return Ok(());
+        }
+    } else {
+        // 如果没有配置，默认启用
+        debug!("未找到余额历史记录配置，使用默认启用");
+    }
     // 计算余额变化量
     let balance_change = if balance_after >= balance_before {
         // 余额增加，变化量为正
@@ -64,6 +75,7 @@ pub async fn save_balance_history(
 /// 查询账户余额历史记录
 pub async fn get_balance_history(
     history_col: &Collection<Document>,
+    config: &Config,
     account: &str,
     start_time: Option<u64>,
     end_time: Option<u64>,
@@ -71,6 +83,13 @@ pub async fn get_balance_history(
     skip: Option<i64>,
     sort_order: Option<&str>,
 ) -> Result<Vec<Document>, Box<dyn Error>> {
+    // 检查是否启用余额历史记录功能
+    if let Some(balance_history_config) = &config.balance_history {
+        if !balance_history_config.enabled {
+            warn!("余额历史记录功能已禁用，返回空结果");
+            return Ok(Vec::new());
+        }
+    }
     let mut filter = doc! { "account": account };
     
     // 添加时间范围过滤
@@ -114,8 +133,16 @@ pub async fn get_balance_history(
 #[allow(dead_code)]
 pub async fn get_latest_balance_record(
     history_col: &Collection<Document>,
+    config: &Config,
     account: &str,
 ) -> Result<Option<Document>, Box<dyn Error>> {
+    // 检查是否启用余额历史记录功能
+    if let Some(balance_history_config) = &config.balance_history {
+        if !balance_history_config.enabled {
+            warn!("余额历史记录功能已禁用，返回空结果");
+            return Ok(None);
+        }
+    }
     let filter = doc! { "account": account };
     let options = FindOneOptions::builder()
         .sort(doc! { "timestamp": -1 })
@@ -128,7 +155,15 @@ pub async fn get_latest_balance_record(
 /// 创建余额历史集合的索引
 pub async fn create_balance_history_indexes(
     history_col: &Collection<Document>,
+    config: &Config,
 ) -> Result<(), Box<dyn Error>> {
+    // 检查是否启用余额历史记录功能
+    if let Some(balance_history_config) = &config.balance_history {
+        if !balance_history_config.enabled {
+            info!("余额历史记录功能已禁用，跳过创建索引");
+            return Ok(());
+        }
+    }
     // 为账户创建索引
     let account_index = mongodb::IndexModel::builder()
         .keys(doc! { "account": 1 })
@@ -173,8 +208,19 @@ pub async fn create_balance_history_indexes(
 /// 获取账户余额历史统计信息
 pub async fn get_balance_history_stats(
     history_col: &Collection<Document>,
+    config: &Config,
     account: &str,
 ) -> Result<Document, Box<dyn Error>> {
+    // 检查是否启用余额历史记录功能
+    if let Some(balance_history_config) = &config.balance_history {
+        if !balance_history_config.enabled {
+            warn!("余额历史记录功能已禁用，返回空统计信息");
+            return Ok(doc! {
+                "total_records": 0i64,
+                "message": "余额历史记录功能已禁用"
+            });
+        }
+    }
     // 获取记录总数
     let count = history_col.count_documents(doc! { "account": account }, None).await?;
     
@@ -237,4 +283,4 @@ pub async fn clear_balance_history(history_col: &Collection<Document>) -> Result
             }
         }
     }
-} 
+}

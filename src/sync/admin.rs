@@ -37,6 +37,7 @@ pub async fn reset_and_sync_all_transactions(
     canister_id: &Principal,
     db_conn: &DbConnection,
     token_config: &crate::models::TokenConfig,
+    config: &crate::models::Config,
 ) -> Result<(), Box<dyn Error>> {
     let token_symbol = &token_config.symbol;
     let token_decimals = token_config.decimals.unwrap_or(8);
@@ -68,7 +69,7 @@ pub async fn reset_and_sync_all_transactions(
     
     // 重新创建索引
     info!("重新创建索引...");
-    create_indexes(db_conn).await?;
+    create_indexes(db_conn, config).await?;
     
     // 第一阶段：同步交易数据
     info!("\n第一阶段：同步所有交易数据到数据库...");
@@ -117,7 +118,8 @@ pub async fn reset_and_sync_all_transactions(
     info!("{}: \n第二阶段：根据账户信息计算余额...", token_symbol);
     calculate_all_balances(
         &db_conn,
-        token_config
+        token_config,
+        config
     ).await?;
     
     // 获取最新交易索引和时间戳，用于设置增量同步起点
@@ -154,6 +156,7 @@ pub async fn reset_and_sync_all_transactions(
 pub async fn calculate_all_balances(
     db_conn: &DbConnection,
     token_config: &crate::models::TokenConfig,
+    config: &crate::models::Config,
 ) -> Result<(), Box<dyn Error>> {
     let token_symbol = &token_config.symbol;
     info!("{}: 开始使用新算法计算所有账户余额...", token_symbol);
@@ -175,7 +178,8 @@ pub async fn calculate_all_balances(
         &collections.total_supply_col,
         &collections.balance_anomalies_col,
         &collections.balance_history_col,
-        token_config
+        token_config,
+        config
     ).await {
         Ok((success, error)) => {
             info!("余额计算完成: 成功处理 {} 个账户, 失败 {} 个账户", success, error);

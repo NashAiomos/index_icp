@@ -121,7 +121,7 @@ pub async fn init_db(mongodb_url: &str, database_name: &str, tokens: &[TokenConf
 }
 
 /// 创建数据库索引
-pub async fn create_indexes(conn: &DbConnection) -> Result<(), Box<dyn Error>> {
+pub async fn create_indexes(conn: &DbConnection, config: &crate::models::Config) -> Result<(), Box<dyn Error>> {
     info!("创建或确认数据库索引...");
     
     // 为每个代币创建索引
@@ -164,7 +164,7 @@ pub async fn create_indexes(conn: &DbConnection) -> Result<(), Box<dyn Error>> {
         }
         
         // 余额历史索引
-        if let Err(e) = crate::db::balance_history::create_balance_history_indexes(&collections.balance_history_col).await {
+        if let Err(e) = crate::db::balance_history::create_balance_history_indexes(&collections.balance_history_col, config).await {
             error!("{}: 余额历史索引创建失败: {}", symbol, e);
         }
     }
