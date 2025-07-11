@@ -1388,6 +1388,37 @@ async fn handle_get_daily_balance(
 ) -> Result<impl Reply, Rejection> {
     info!("API请求: 获取账户每日余额记录 - account: {}", account);
     
+    // 验证日期格式
+    if let Some(ref start_date) = params.start_date {
+        if !crate::db::daily_balance::validate_date_format(start_date) {
+            return Err(warp::reject::custom(ApiError::InvalidInput(
+                format!("开始日期格式错误: {}，应为 YYYY-MM-DD 格式", start_date)
+            )));
+        }
+    }
+    
+    if let Some(ref end_date) = params.end_date {
+        if !crate::db::daily_balance::validate_date_format(end_date) {
+            return Err(warp::reject::custom(ApiError::InvalidInput(
+                format!("结束日期格式错误: {}，应为 YYYY-MM-DD 格式", end_date)
+            )));
+        }
+    }
+    
+    // 验证日期范围的逻辑性
+    if let (Some(ref start_date), Some(ref end_date)) = (&params.start_date, &params.end_date) {
+        if let (Ok(start_parsed), Ok(end_parsed)) = (
+            crate::db::daily_balance::parse_date(start_date),
+            crate::db::daily_balance::parse_date(end_date)
+        ) {
+            if start_parsed > end_parsed {
+                return Err(warp::reject::custom(ApiError::InvalidInput(
+                    "开始日期不能晚于结束日期".to_string()
+                )));
+            }
+        }
+    }
+    
     // 从查询参数中提取代币符号（如果有）
     let token_symbol = params.token.as_deref();
     

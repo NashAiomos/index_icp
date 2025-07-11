@@ -32,9 +32,14 @@ pub fn get_date_from_timestamp(timestamp_nanos: u64) -> String {
 }
 
 /// 解析日期字符串为NaiveDate
-fn parse_date(date_str: &str) -> Result<NaiveDate, Box<dyn Error>> {
+pub fn parse_date(date_str: &str) -> Result<NaiveDate, Box<dyn Error>> {
     NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
         .map_err(|e| create_error(&format!("日期格式错误: {}", e)))
+}
+
+/// 验证日期字符串格式是否正确
+pub fn validate_date_format(date_str: &str) -> bool {
+    parse_date(date_str).is_ok()
 }
 
 /// 为账户在指定日期更新或创建每日余额记录
@@ -113,8 +118,8 @@ pub async fn update_daily_balance_record(
     
     match daily_balance_col.replace_one(filter, record_doc, options).await {
         Ok(_) => {
-            debug!("已更新账户 {} 日期 {} 的每日余额记录，包含 {} 笔交易", 
-                   account, date, transactions_on_date.len());
+            info!("已更新账户 {} 在 {} 的每日余额记录: 包含 {} 笔交易，最高余额: {}，最低余额: {}，结束余额: {}", 
+                  account, date, transactions_on_date.len(), max_balance.0, min_balance.0, end_balance.0);
             Ok(())
         },
         Err(e) => {
@@ -318,9 +323,21 @@ pub async fn recalculate_account_daily_balances(
     account: &str,
     tx_indices: &[i64],
 ) -> Result<(), Box<dyn Error>> {
+    info!("开始计算账户 {} 的每日余额记录，共 {} 笔交易", account, tx_indices.len());
+    
     if tx_indices.is_empty() {
         debug!("账户 {} 没有交易记录，跳过每日余额计算", account);
         return Ok(());
+    }
+
+    // 首先清空该账户的现有每日余额记录
+    let delete_result = daily_balance_col.delete_many(
+        doc! { "account": account },
+        None
+    ).await?;
+    
+    if delete_result.deleted_count > 0 {
+        info!("已清除账户 {} 的 {} 条现有每日余额记录", account, delete_result.deleted_count);
     }
 
     // 获取该账户的所有交易，按索引排序
@@ -334,9 +351,10 @@ pub async fn recalculate_account_daily_balances(
     
     let mut tx_cursor = tx_col.find(filter, options).await?;
     
-    // 按日期分组交易
+    // 按日期分组交易，同时计算每笔交易后的余额
     let mut daily_transactions: HashMap<String, Vec<(u64, Nat)>> = HashMap::new();
-    let current_balance = Nat::from(0u64);
+    let mut current_balance = Nat::from(0u64);
+    let normalized_account = crate::db::balances::normalize_account_id(account);
     
     while tx_cursor.advance().await? {
         let doc = tx_cursor.current();
@@ -346,33 +364,138 @@ pub async fn recalculate_account_daily_balances(
         if let Some(tx_index) = transaction.index {
             let date = get_date_from_timestamp(transaction.timestamp);
             
-            // 这里需要根据交易计算余额变化
-            // 暂时使用简化逻辑，实际应该从交易中计算余额变化
-            // TODO: 集成实际的余额计算逻辑
+            // 根据交易类型计算余额变化
+            let mut balance_changed = false;
             
-            daily_transactions
-                .entry(date)
-                .or_insert_with(Vec::new)
-                .push((tx_index, current_balance.clone()));
+            match transaction.kind.as_str() {
+                "transfer" => {
+                    if let Some(transfer) = &transaction.transfer {
+                        let from_account = crate::db::balances::normalize_account_id(&transfer.from.to_string());
+                        let to_account = crate::db::balances::normalize_account_id(&transfer.to.to_string());
+                        
+                        // 如果是发送方，减少余额
+                        if from_account == normalized_account {
+                            // 减去转账金额
+                            if current_balance >= transfer.amount {
+                                current_balance = current_balance.clone() - transfer.amount.clone();
+                            } else {
+                                warn!("账户 {} 余额不足，转账金额 {} 大于当前余额 {}", 
+                                      normalized_account, transfer.amount, current_balance);
+                                current_balance = Nat::from(0u64);
+                            }
+                            balance_changed = true;
+                            
+                            // 减去手续费
+                            if let Some(fee) = &transfer.fee {
+                                if current_balance >= *fee {
+                                    current_balance = current_balance.clone() - fee.clone();
+                                } else {
+                                    warn!("账户 {} 余额不足支付手续费 {}", normalized_account, fee);
+                                    current_balance = Nat::from(0u64);
+                                }
+                            }
+                        }
+                        
+                        // 如果是接收方，增加余额
+                        if to_account == normalized_account {
+                            current_balance = current_balance.clone() + transfer.amount.clone();
+                            balance_changed = true;
+                        }
+                    }
+                },
+                "mint" => {
+                    if let Some(mint) = &transaction.mint {
+                        let to_account = crate::db::balances::normalize_account_id(&mint.to.to_string());
+                        
+                        if to_account == normalized_account {
+                            current_balance = current_balance.clone() + mint.amount.clone();
+                            balance_changed = true;
+                        }
+                    }
+                },
+                "burn" => {
+                    if let Some(burn) = &transaction.burn {
+                        let from_account = crate::db::balances::normalize_account_id(&burn.from.to_string());
+                        
+                        if from_account == normalized_account {
+                            if current_balance >= burn.amount {
+                                current_balance = current_balance.clone() - burn.amount.clone();
+                            } else {
+                                warn!("账户 {} 余额不足，销毁金额 {} 大于当前余额 {}", 
+                                      normalized_account, burn.amount, current_balance);
+                                current_balance = Nat::from(0u64);
+                            }
+                            balance_changed = true;
+                        }
+                    }
+                },
+                "approve" => {
+                    if let Some(approve) = &transaction.approve {
+                        let from_account = crate::db::balances::normalize_account_id(&approve.from.to_string());
+                        
+                        if from_account == normalized_account {
+                            // 授权交易只影响手续费
+                            if let Some(fee) = &approve.fee {
+                                if current_balance >= *fee {
+                                    current_balance = current_balance.clone() - fee.clone();
+                                } else {
+                                    warn!("账户 {} 余额不足支付授权手续费 {}", normalized_account, fee);
+                                    current_balance = Nat::from(0u64);
+                                }
+                                balance_changed = true;
+                            }
+                        }
+                    }
+                },
+                _ => {
+                    // 其他交易类型，暂时跳过
+                    debug!("跳过未知交易类型: {} (索引: {})", transaction.kind, tx_index);
+                }
+            }
+            
+            // 如果余额发生变化，记录到对应日期
+            if balance_changed {
+                daily_transactions
+                    .entry(date)
+                    .or_insert_with(Vec::new)
+                    .push((tx_index, current_balance.clone()));
+            }
         }
     }
     
     // 为每一天创建或更新记录
+    let mut processed_days = 0;
+    let mut processed_transactions = 0;
+    
+    info!("开始处理账户 {} 的每日余额记录，共 {} 天有交易", account, daily_transactions.len());
+    
     for (date, transactions) in daily_transactions {
         if !transactions.is_empty() {
             let transactions_ref: Vec<(u64, &Nat)> = transactions.iter()
                 .map(|(idx, balance)| (*idx, balance))
                 .collect();
             
-            update_daily_balance_record(
+            match update_daily_balance_record(
                 daily_balance_col,
                 config,
                 account,
                 &date,
                 &transactions_ref,
-            ).await?;
+            ).await {
+                Ok(_) => {
+                    processed_days += 1;
+                    processed_transactions += transactions.len();
+                    debug!("已更新账户 {} 日期 {} 的每日余额记录，包含 {} 笔交易", 
+                           account, date, transactions.len());
+                },
+                Err(e) => {
+                    error!("更新账户 {} 日期 {} 的每日余额记录失败: {}", account, date, e);
+                    return Err(e);
+                }
+            }
         }
     }
     
+    info!("完成账户 {} 的每日余额记录计算: 处理 {} 天，共 {} 笔交易", account, processed_days, processed_transactions);
     Ok(())
 } 

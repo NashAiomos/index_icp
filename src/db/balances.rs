@@ -182,6 +182,8 @@ pub async fn calculate_all_balances(
     
     info!("全量余额计算完成: 处理 {} 个账户, 失败 {} 个账户, 检测到 {} 个余额异常", 
           success_count, error_count, total_anomalies);
+    
+    info!("📊 每日余额记录已同步更新完成");
 
     // 重新计算并保存总供应量
     supply::recalculate_total_supply(balances_col, supply_col).await?;
@@ -219,44 +221,39 @@ pub async fn calculate_incremental_balances(
     for tx in new_transactions {
         match tx.kind.as_str() {
             "transfer" => {
-                if let Some(ref transfer) = tx.transfer {
-                    affected_accounts.insert(transfer.from.to_string());
-                    affected_accounts.insert(transfer.to.to_string());
-                    // 处理transferFrom的代理地址
-                    if let Some(ref spender) = transfer.spender {
-                        affected_accounts.insert(spender.to_string());
-                    }
+                if let Some(transfer) = &tx.transfer {
+                    let from_account = normalize_account_id(&transfer.from.to_string());
+                    let to_account = normalize_account_id(&transfer.to.to_string());
+                    affected_accounts.insert(from_account);
+                    affected_accounts.insert(to_account);
                 }
             },
             "mint" => {
-                if let Some(ref mint) = tx.mint {
-                    affected_accounts.insert(mint.to.to_string());
+                if let Some(mint) = &tx.mint {
+                    let to_account = normalize_account_id(&mint.to.to_string());
+                    affected_accounts.insert(to_account);
                 }
             },
             "burn" => {
-                if let Some(ref burn) = tx.burn {
-                    affected_accounts.insert(burn.from.to_string());
-                    // 处理授权销毁的代理地址
-                    if let Some(ref spender) = burn.spender {
-                        affected_accounts.insert(spender.to_string());
-                    }
+                if let Some(burn) = &tx.burn {
+                    let from_account = normalize_account_id(&burn.from.to_string());
+                    affected_accounts.insert(from_account);
                 }
             },
             "approve" => {
-                if let Some(ref approve) = tx.approve {
-                    affected_accounts.insert(approve.from.to_string());
-                    affected_accounts.insert(approve.spender.to_string());
+                if let Some(approve) = &tx.approve {
+                    let from_account = normalize_account_id(&approve.from.to_string());
+                    affected_accounts.insert(from_account);
                 }
             },
-            "notify" => {
-                // ICRC-3通知事件处理
-                debug!("检测到通知事件，但ICRC-3实现尚未完成");
-            },
             _ => {
-                warn!("未知交易类型: {}, 跳过账户提取", tx.kind);
+                // 其他交易类型暂不处理
             }
         }
     }
+    
+    let affected_accounts_count = affected_accounts.len();
+    info!("共有 {} 个账户受到影响，需要重新计算余额", affected_accounts_count);
     
     debug!("找到 {} 个受影响的账户需要更新余额", affected_accounts.len());
     
@@ -341,6 +338,8 @@ pub async fn calculate_incremental_balances(
     
     info!("增量余额计算完成: 更新 {} 个账户, 失败 {} 个账户, 检测到 {} 个余额异常", 
           success_count, error_count, total_anomalies);
+    
+    info!("📊 每日余额记录已同步更新完成 (受影响账户: {})", affected_accounts_count);
     
     // 重新计算并保存总供应量
     supply::recalculate_total_supply(balances_col, supply_col).await?;
@@ -638,8 +637,14 @@ pub async fn calculate_account_balance(
     }
     
     // 处理每日余额聚合
+    let mut daily_balance_records_count = 0;
+    let mut daily_balance_days_count = 0;
+    
     for (date, transactions) in daily_transactions {
         if !transactions.is_empty() {
+            daily_balance_days_count += 1;
+            daily_balance_records_count += transactions.len();
+            
             let transactions_ref: Vec<(u64, &Nat)> = transactions.iter()
                 .map(|(idx, balance)| (*idx, balance))
                 .collect();
@@ -656,6 +661,11 @@ pub async fn calculate_account_balance(
                 debug!("已更新账户 {} 日期 {} 的每日余额记录", normalized_account, date);
             }
         }
+    }
+    
+    if daily_balance_days_count > 0 {
+        info!("📊 账户 {} 的每日余额记录已更新: {} 天，共 {} 笔交易", 
+               normalized_account, daily_balance_days_count, daily_balance_records_count);
     }
     
     Ok((balance, has_anomalies))

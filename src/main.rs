@@ -481,7 +481,7 @@ async fn run_application(cfg: models::Config) -> Result<(), Box<dyn Error>> {
                         warn!("{}: 数据库最新交易索引 ({}) 大于同步状态记录的索引 ({}), 检测到数据不一致", 
                               token.symbol, db_latest_index, status.last_synced_index);
                         
-                        info!("{}: 根据用户要求，删除索引大于 {} 的多余交易...", token.symbol, status.last_synced_index);
+                        info!("{}: 删除索引大于 {} 的多余交易...", token.symbol, status.last_synced_index);
                         
                         // 删除多出来的交易
                         match delete_transactions_above_index(&collections.tx_col, status.last_synced_index).await {
