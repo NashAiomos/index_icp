@@ -23,6 +23,8 @@ pub enum ApiError {
     Database(String),
     /// 无效的查询参数
     InvalidQuery(String),
+    /// 无效的输入参数
+    InvalidInput(String),
     /// 资源未找到
     NotFound(String),
     /// 代币相关错误
@@ -40,6 +42,7 @@ impl fmt::Display for ApiError {
         match self {
             ApiError::Database(msg) => write!(f, "数据库错误: {}", msg),
             ApiError::InvalidQuery(msg) => write!(f, "无效的查询参数: {}", msg),
+            ApiError::InvalidInput(msg) => write!(f, "无效的输入参数: {}", msg),
             ApiError::NotFound(msg) => write!(f, "资源未找到: {}", msg),
             ApiError::TokenError(msg) => write!(f, "代币错误: {}", msg),
             ApiError::Internal(msg) => write!(f, "内部服务器错误: {}", msg),
@@ -66,6 +69,7 @@ pub async fn handle_rejection(err: warp::Rejection) -> Result<impl warp::Reply, 
         match e {
             ApiError::Database(_) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             ApiError::InvalidQuery(_) => (StatusCode::BAD_REQUEST, e.to_string()),
+            ApiError::InvalidInput(_) => (StatusCode::BAD_REQUEST, e.to_string()),
             ApiError::NotFound(_) => (StatusCode::NOT_FOUND, e.to_string()),
             ApiError::TokenError(_) => (StatusCode::BAD_REQUEST, e.to_string()),
             ApiError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),

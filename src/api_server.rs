@@ -184,6 +184,8 @@ pub struct ApiServer {
     db_conn: Arc<DbConnection>,
     /// 支持的代币配置列表
     tokens: Vec<crate::models::TokenConfig>,
+    /// 应用配置
+    config: Arc<crate::models::Config>,
 }
 
 /// API查询参数
@@ -248,13 +250,15 @@ impl ApiServer {
     /// # 参数
     /// * `db_conn` - 数据库连接实例
     /// * `tokens` - 支持的代币配置列表
+    /// * `config` - 应用配置
     /// 
     /// # 返回
     /// 返回一个新的ApiServer实例
-    pub fn new(db_conn: DbConnection, tokens: Vec<crate::models::TokenConfig>) -> Self {
+    pub fn new(db_conn: DbConnection, tokens: Vec<crate::models::TokenConfig>, config: crate::models::Config) -> Self {
         Self {
             db_conn: Arc::new(db_conn),
             tokens,
+            config: Arc::new(config),
         }
     }
 
@@ -323,27 +327,33 @@ impl ApiServer {
                 handle_get_balance(account, params, db, tokens).await
             });
 
-        // 获取账户余额历史
-        let tokens_for_balance_history = self.tokens.clone();
-        let balance_history = warp::path!("api" / "balance_history" / String)
+        // 获取账户每日余额记录
+        let tokens_for_daily_balance = self.tokens.clone();
+        let config_for_daily_balance = self.config.clone();
+        let daily_balance = warp::path!("api" / "daily_balance" / String)
             .and(warp::get())
-            .and(warp::query::<crate::models::BalanceHistoryQuery>())
+            .and(warp::query::<crate::models::DailyBalanceQuery>())
             .and(with_db(db_conn.clone()))
-            .and(warp::any().map(move || tokens_for_balance_history.clone()))
-            .and_then(|account, params, db, tokens| async move {
-                handle_get_balance_history(account, params, db, tokens).await
+            .and(warp::any().map(move || tokens_for_daily_balance.clone()))
+            .and(with_config(config_for_daily_balance))
+            .and_then(|account, params, db, tokens, config| async move {
+                handle_get_daily_balance(account, params, db, tokens, config).await
             });
 
-        // 获取账户余额历史统计
-        let tokens_for_balance_stats = self.tokens.clone();
-        let balance_stats = warp::path!("api" / "balance_stats" / String)
+        // 获取账户每日余额统计
+        let tokens_for_daily_stats = self.tokens.clone();
+        let config_for_daily_stats = self.config.clone();
+        let daily_balance_stats = warp::path!("api" / "daily_balance_stats" / String)
             .and(warp::get())
             .and(warp::query::<QueryParams>())
             .and(with_db(db_conn.clone()))
-            .and(warp::any().map(move || tokens_for_balance_stats.clone()))
-            .and_then(|account, params, db, tokens| async move {
-                handle_get_balance_stats(account, params, db, tokens).await
+            .and(warp::any().map(move || tokens_for_daily_stats.clone()))
+            .and(with_config(config_for_daily_stats))
+            .and_then(|account, params, db, tokens, config| async move {
+                handle_get_daily_balance_stats(account, params, db, tokens, config).await
             });
+
+
 
         // 获取账户交易历史
         let tokens_for_transactions = self.tokens.clone();
@@ -491,8 +501,8 @@ impl ApiServer {
         // 合并所有路由
         supported_tokens
             .or(balance)
-            .or(balance_history)
-            .or(balance_stats)
+            .or(daily_balance)
+            .or(daily_balance_stats)
             .or(transactions)
             .or(transaction)
             .or(latest_transactions)
@@ -553,6 +563,11 @@ fn find_token<'a>(
 #[allow(dead_code)]
 fn with_tokens(tokens: Vec<crate::models::TokenConfig>) -> impl Filter<Extract = (Vec<crate::models::TokenConfig>,), Error = std::convert::Infallible> + Clone {
     warp::any().map(move || tokens.clone())
+}
+
+/// 提供配置的过滤器
+fn with_config(config: Arc<crate::models::Config>) -> impl Filter<Extract = (Arc<crate::models::Config>,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || config.clone())
 }
 
 /// 处理函数：获取账户余额
@@ -1353,22 +1368,57 @@ async fn handle_get_account_first_transaction(
     }
 }
 
-/// 处理获取账户余额历史的请求
+/// 处理获取账户每日余额记录的请求
 /// 
 /// # 参数
 /// * `account` - 账户地址
-/// * `params` - 查询参数（时间范围、分页等）
+/// * `params` - 查询参数（日期范围、分页等）
 /// * `db_conn` - 数据库连接
 /// * `tokens` - 代币配置列表
+/// * `config` - 应用配置
 /// 
 /// # 返回
-/// 账户的余额变化历史记录
-async fn handle_get_balance_history(
+/// 账户的每日余额聚合记录
+async fn handle_get_daily_balance(
     account: String,
-    params: crate::models::BalanceHistoryQuery,
+    params: crate::models::DailyBalanceQuery,
     db_conn: Arc<DbConnection>,
     tokens: Vec<crate::models::TokenConfig>,
+    config: Arc<crate::models::Config>,
 ) -> Result<impl Reply, Rejection> {
+    info!("API请求: 获取账户每日余额记录 - account: {}", account);
+    
+    // 验证日期格式
+    if let Some(ref start_date) = params.start_date {
+        if !crate::db::daily_balance::validate_date_format(start_date) {
+            return Err(warp::reject::custom(ApiError::InvalidInput(
+                format!("开始日期格式错误: {}，应为 YYYY-MM-DD 格式", start_date)
+            )));
+        }
+    }
+    
+    if let Some(ref end_date) = params.end_date {
+        if !crate::db::daily_balance::validate_date_format(end_date) {
+            return Err(warp::reject::custom(ApiError::InvalidInput(
+                format!("结束日期格式错误: {}，应为 YYYY-MM-DD 格式", end_date)
+            )));
+        }
+    }
+    
+    // 验证日期范围的逻辑性
+    if let (Some(ref start_date), Some(ref end_date)) = (&params.start_date, &params.end_date) {
+        if let (Ok(start_parsed), Ok(end_parsed)) = (
+            crate::db::daily_balance::parse_date(start_date),
+            crate::db::daily_balance::parse_date(end_date)
+        ) {
+            if start_parsed > end_parsed {
+                return Err(warp::reject::custom(ApiError::InvalidInput(
+                    "开始日期不能晚于结束日期".to_string()
+                )));
+            }
+        }
+    }
+    
     // 从查询参数中提取代币符号（如果有）
     let token_symbol = params.token.as_deref();
     
@@ -1384,31 +1434,24 @@ async fn handle_get_balance_history(
     // 规范化账户格式
     let normalized_account = crate::db::balances::normalize_account_id(&account);
     
-    match crate::db::balance_history::get_balance_history(
-        &collections.balance_history_col,
+    match crate::db::daily_balance::get_daily_balance_records(
+        &collections.daily_balance_col,
+        &config,
         &normalized_account,
-        params.start_time,
-        params.end_time,
+        params.start_date.as_deref(),
+        params.end_date.as_deref(),
         params.limit,
         params.skip,
         params.sort.as_deref(),
     ).await {
-        Ok(history_docs) => {
-            // 将余额历史记录转换为JSON格式
-            let history_list: Vec<_> = history_docs.into_iter().map(|doc| {
+        Ok(daily_records) => {
+            // 将每日余额记录转换为JSON格式
+            let records_list: Vec<_> = daily_records.into_iter().map(|doc| {
                 // 添加代币信息
                 let mut doc = doc;
                 doc.insert("token", &token_config.symbol);
                 doc.insert("token_name", &token_config.name);
                 doc.insert("decimals", token_config.decimals.unwrap_or(8) as i32);
-                
-                // 将时间戳转换为ISO格式
-                if let Ok(timestamp) = doc.get_i64("timestamp") {
-                    let datetime = chrono::DateTime::from_timestamp(timestamp, 0)
-                        .map(|dt| dt.to_rfc3339())
-                        .unwrap_or_default();
-                    doc.insert("datetime", datetime);
-                }
                 
                 doc
             }).collect();
@@ -1416,34 +1459,39 @@ async fn handle_get_balance_history(
             let response = ApiResponse::success(doc! {
                 "account": normalized_account,
                 "token": &token_config.symbol,
-                "total": history_list.len() as i64,
-                "history": history_list,
+                "total": records_list.len() as i64,
+                "daily_records": records_list,
             });
             Ok(warp::reply::json(&response))
         },
         Err(e) => {
-            let error_msg = format!("查询余额历史失败: {}", e);
+            let error_msg = format!("查询每日余额记录失败: {}", e);
+            error!("API响应错误: {}", error_msg);
             Err(warp::reject::custom(ApiError::Database(error_msg)))
         }
     }
 }
 
-/// 处理获取账户余额历史统计的请求
+/// 处理获取账户每日余额统计的请求
 /// 
 /// # 参数
 /// * `account` - 账户地址
 /// * `params` - 查询参数
 /// * `db_conn` - 数据库连接
 /// * `tokens` - 代币配置列表
+/// * `config` - 应用配置
 /// 
 /// # 返回
-/// 账户的余额历史统计信息
-async fn handle_get_balance_stats(
+/// 账户的每日余额统计信息
+async fn handle_get_daily_balance_stats(
     account: String,
     params: QueryParams,
     db_conn: Arc<DbConnection>,
     tokens: Vec<crate::models::TokenConfig>,
+    config: Arc<crate::models::Config>,
 ) -> Result<impl Reply, Rejection> {
+    info!("API请求: 获取账户每日余额统计 - account: {}", account);
+    
     // 查找代币
     let token_config = find_token(&tokens, params.token.as_deref())?;
     
@@ -1456,8 +1504,9 @@ async fn handle_get_balance_stats(
     // 规范化账户格式
     let normalized_account = crate::db::balances::normalize_account_id(&account);
     
-    match crate::db::balance_history::get_balance_history_stats(
-        &collections.balance_history_col,
+    match crate::db::daily_balance::get_daily_balance_stats(
+        &collections.daily_balance_col,
+        &config,
         &normalized_account,
     ).await {
         Ok(mut stats) => {
@@ -1471,8 +1520,11 @@ async fn handle_get_balance_stats(
             Ok(warp::reply::json(&response))
         },
         Err(e) => {
-            let error_msg = format!("查询余额历史统计失败: {}", e);
+            let error_msg = format!("查询每日余额统计失败: {}", e);
+            error!("API响应错误: {}", error_msg);
             Err(warp::reject::custom(ApiError::Database(error_msg)))
         }
     }
 }
+
+

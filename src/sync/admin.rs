@@ -19,15 +19,18 @@ use std::error::Error;
 use ic_agent::Agent;
 use ic_agent::export::Principal;
 use log::{info, error, warn};
+use futures::TryStreamExt;
 use crate::db::transactions::clear_transactions;
 use crate::db::accounts::clear_accounts;
 use crate::db::balances::{clear_balances, calculate_all_balances as calc_balances};
+use crate::db::daily_balance::{clear_daily_balance};
 use crate::db::sync_status::{clear_sync_status, set_full_sync_mode, set_incremental_mode};
 use crate::db::create_indexes;
 use crate::db::DbConnection;
 use crate::sync::archive::sync_archive_transactions;
 use crate::sync::ledger::sync_ledger_transactions;
 use crate::blockchain::get_first_transaction_index;
+use mongodb::bson::{doc, Bson};
 
 /// 重置数据库并完全重新同步所有交易
 /// 
@@ -37,6 +40,7 @@ pub async fn reset_and_sync_all_transactions(
     canister_id: &Principal,
     db_conn: &DbConnection,
     token_config: &crate::models::TokenConfig,
+    config: &crate::models::Config,
 ) -> Result<(), Box<dyn Error>> {
     let token_symbol = &token_config.symbol;
     let token_decimals = token_config.decimals.unwrap_or(8);
@@ -60,6 +64,33 @@ pub async fn reset_and_sync_all_transactions(
     info!("清空余额集合...");
     clear_balances(&collections.balances_col).await?;
     
+    info!("清空每日余额集合...");
+    clear_daily_balance(&collections.daily_balance_col).await?;
+    
+    info!("清空余额异常集合...");
+    if let Err(e) = collections.balance_anomalies_col.delete_many(mongodb::bson::doc! {}, None).await {
+        // 检查是否是命名空间不存在的错误
+        if !e.to_string().contains("NamespaceNotFound") && !e.to_string().contains("ns not found") {
+            error!("清除余额异常集合失败: {}", e);
+        } else {
+            info!("余额异常集合不存在，跳过清除操作");
+        }
+    } else {
+        info!("已清除余额异常集合");
+    }
+    
+    info!("清空总供应量集合...");
+    if let Err(e) = collections.total_supply_col.delete_many(mongodb::bson::doc! {}, None).await {
+        // 检查是否是命名空间不存在的错误
+        if !e.to_string().contains("NamespaceNotFound") && !e.to_string().contains("ns not found") {
+            error!("清除总供应量集合失败: {}", e);
+        } else {
+            info!("总供应量集合不存在，跳过清除操作");
+        }
+    } else {
+        info!("已清除总供应量集合");
+    }
+    
     info!("清空同步状态集合...");
     clear_sync_status(&db_conn.sync_status_col).await?;
     
@@ -68,7 +99,7 @@ pub async fn reset_and_sync_all_transactions(
     
     // 重新创建索引
     info!("重新创建索引...");
-    create_indexes(db_conn).await?;
+    create_indexes(db_conn, config).await?;
     
     // 第一阶段：同步交易数据
     info!("\n第一阶段：同步所有交易数据到数据库...");
@@ -113,11 +144,20 @@ pub async fn reset_and_sync_all_transactions(
         true // 计算余额
     ).await?;
     
-    // 第二阶段：计算余额
+    // 第二阶段：计算余额（但禁用每日余额记录更新，避免不准确的记录）
     info!("{}: \n第二阶段：根据账户信息计算余额...", token_symbol);
     calculate_all_balances(
         &db_conn,
-        token_config
+        token_config,
+        config
+    ).await?;
+    
+    // 第三阶段：重新计算所有账户的每日余额记录
+    info!("{}: \n第三阶段：重新计算所有账户的每日余额记录...", token_symbol);
+    recalculate_all_account_daily_balances(
+        &db_conn,
+        token_config,
+        config
     ).await?;
     
     // 获取最新交易索引和时间戳，用于设置增量同步起点
@@ -144,7 +184,7 @@ pub async fn reset_and_sync_all_transactions(
         set_incremental_mode(&db_conn.sync_status_col, token_symbol, 0, 0).await?;
     }
     
-    info!("数据库重置和交易同步完成，所有账户余额已根据交易记录重新计算！");
+    info!("数据库重置和交易同步完成，所有账户余额和每日余额记录已根据交易记录重新计算！");
     info!("下次运行将从索引 {} 开始增量同步", latest_index + 1);
     
     Ok(())
@@ -154,6 +194,7 @@ pub async fn reset_and_sync_all_transactions(
 pub async fn calculate_all_balances(
     db_conn: &DbConnection,
     token_config: &crate::models::TokenConfig,
+    config: &crate::models::Config,
 ) -> Result<(), Box<dyn Error>> {
     let token_symbol = &token_config.symbol;
     info!("{}: 开始使用新算法计算所有账户余额...", token_symbol);
@@ -174,8 +215,9 @@ pub async fn calculate_all_balances(
         &collections.balances_col,
         &collections.total_supply_col,
         &collections.balance_anomalies_col,
-        &collections.balance_history_col,
-        token_config
+        &collections.daily_balance_col,
+        token_config,
+        config
     ).await {
         Ok((success, error)) => {
             info!("余额计算完成: 成功处理 {} 个账户, 失败 {} 个账户", success, error);
@@ -187,6 +229,85 @@ pub async fn calculate_all_balances(
     }
     
     info!("所有账户的余额计算已完成");
+    Ok(())
+}
+
+/// 重新计算所有账户的每日余额记录
+async fn recalculate_all_account_daily_balances(
+    db_conn: &DbConnection,
+    token_config: &crate::models::TokenConfig,
+    config: &crate::models::Config,
+) -> Result<(), Box<dyn Error>> {
+    let token_symbol = &token_config.symbol;
+    info!("{}: 开始重新计算所有账户的每日余额记录...", token_symbol);
+    
+    // 获取该代币的集合
+    let collections = match db_conn.collections.get(token_symbol) {
+        Some(cols) => cols,
+        None => {
+            return Err(format!("未找到代币 {} 的集合", token_symbol).into());
+        }
+    };
+    
+    // 查询所有账户
+    let mut accounts_cursor = collections.accounts_col.find(doc! {}, None).await?;
+    
+    let mut success_count = 0u64;
+    let mut error_count = 0u64;
+    
+    while let Some(doc) = accounts_cursor.try_next().await? {
+        let account = doc.get_str("account").unwrap_or("").to_string();
+        
+        // 获取该账户的交易索引列表
+        let tx_indices: Vec<i64> = if let Some(indices) = doc.get("transaction_indices") {
+            if let Bson::Array(arr) = indices {
+                arr.iter().filter_map(|b| match b {
+                    Bson::Int64(i) => Some(*i),
+                    Bson::Int32(i) => Some(i64::from(*i)),
+                    _ => None,
+                }).collect()
+            } else {
+                error!("账户 {} 的交易索引不是数组格式", account);
+                error_count += 1;
+                continue;
+            }
+        } else {
+            // 如果没有交易索引，也算作成功处理
+            info!("📝 账户 {} 没有交易记录，跳过每日余额计算", account);
+            success_count += 1;
+            continue;
+        };
+        
+        if !tx_indices.is_empty() {
+            info!("🔄 正在重新计算账户 {} 的每日余额记录 (共 {} 笔交易)...", account, tx_indices.len());
+            
+            // 为该账户重新计算每日余额记录
+            match crate::db::daily_balance::recalculate_account_daily_balances(
+                &collections.daily_balance_col,
+                &collections.tx_col,
+                config,
+                &account,
+                &tx_indices,
+            ).await {
+                Ok(_) => {
+                    success_count += 1;
+                    info!("✅ 账户 {} 的每日余额记录重新计算完成", account);
+                },
+                Err(e) => {
+                    error!("重新计算账户 {} 的每日余额记录失败: {}", account, e);
+                    error_count += 1;
+                }
+            }
+        } else {
+            // 如果账户没有交易，也算作成功处理
+            info!("📝 账户 {} 没有交易记录，跳过每日余额计算", account);
+            success_count += 1;
+        }
+    }
+    
+    info!("{}: 完成重新计算所有账户的每日余额记录: 成功 {} 个账户，失败 {} 个账户", 
+          token_symbol, success_count, error_count);
+    
     Ok(())
 }
 

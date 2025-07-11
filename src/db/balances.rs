@@ -95,8 +95,9 @@ pub async fn calculate_all_balances(
     balances_col: &Collection<Document>,
     supply_col: &Collection<Document>,
     anomalies_col: &Collection<Document>,
-    balance_history_col: &Collection<Document>,
+    daily_balance_col: &Collection<Document>,
     token_config: &crate::models::TokenConfig,
+    config: &crate::models::Config,
 ) -> Result<(u64, u64), Box<dyn Error>> {
     // 获取代币小数位数，默认为8
     let _token_decimals = token_config.decimals.unwrap_or(8);
@@ -106,8 +107,7 @@ pub async fn calculate_all_balances(
     // 首先清空余额集合
     clear_balances(balances_col).await?;
     
-    // 清空余额历史集合（全量计算时重新生成）
-    crate::db::balance_history::clear_balance_history(balance_history_col).await?;
+
     
     // 查询所有账户
     let mut accounts_cursor = accounts_col.find(doc! {}, None).await?;
@@ -156,7 +156,7 @@ pub async fn calculate_all_balances(
         }
         
         // 计算该账户的余额
-        match calculate_account_balance(&account, &tx_indices, tx_col, token_config, anomalies_col, balance_history_col).await {
+        match calculate_account_balance(&account, &tx_indices, tx_col, token_config, anomalies_col, daily_balance_col, config).await {
             Ok((balance, has_anomalies)) => {
                 // 更新余额记录
                 match save_account_balance(balances_col, &account, &balance).await {
@@ -182,6 +182,8 @@ pub async fn calculate_all_balances(
     
     info!("全量余额计算完成: 处理 {} 个账户, 失败 {} 个账户, 检测到 {} 个余额异常", 
           success_count, error_count, total_anomalies);
+    
+    info!("📊 每日余额记录已同步更新完成");
 
     // 重新计算并保存总供应量
     supply::recalculate_total_supply(balances_col, supply_col).await?;
@@ -198,8 +200,9 @@ pub async fn calculate_incremental_balances(
     balances_col: &Collection<Document>,
     supply_col: &Collection<Document>,
     anomalies_col: &Collection<Document>,
-    balance_history_col: &Collection<Document>,
+    daily_balance_col: &Collection<Document>,
     token_config: &crate::models::TokenConfig,
+    config: &crate::models::Config,
 ) -> Result<(u64, u64), Box<dyn Error>> {
     // 获取代币小数位数，默认为8
     let _token_decimals = token_config.decimals.unwrap_or(8);
@@ -218,44 +221,39 @@ pub async fn calculate_incremental_balances(
     for tx in new_transactions {
         match tx.kind.as_str() {
             "transfer" => {
-                if let Some(ref transfer) = tx.transfer {
-                    affected_accounts.insert(transfer.from.to_string());
-                    affected_accounts.insert(transfer.to.to_string());
-                    // 处理transferFrom的代理地址
-                    if let Some(ref spender) = transfer.spender {
-                        affected_accounts.insert(spender.to_string());
-                    }
+                if let Some(transfer) = &tx.transfer {
+                    let from_account = normalize_account_id(&transfer.from.to_string());
+                    let to_account = normalize_account_id(&transfer.to.to_string());
+                    affected_accounts.insert(from_account);
+                    affected_accounts.insert(to_account);
                 }
             },
             "mint" => {
-                if let Some(ref mint) = tx.mint {
-                    affected_accounts.insert(mint.to.to_string());
+                if let Some(mint) = &tx.mint {
+                    let to_account = normalize_account_id(&mint.to.to_string());
+                    affected_accounts.insert(to_account);
                 }
             },
             "burn" => {
-                if let Some(ref burn) = tx.burn {
-                    affected_accounts.insert(burn.from.to_string());
-                    // 处理授权销毁的代理地址
-                    if let Some(ref spender) = burn.spender {
-                        affected_accounts.insert(spender.to_string());
-                    }
+                if let Some(burn) = &tx.burn {
+                    let from_account = normalize_account_id(&burn.from.to_string());
+                    affected_accounts.insert(from_account);
                 }
             },
             "approve" => {
-                if let Some(ref approve) = tx.approve {
-                    affected_accounts.insert(approve.from.to_string());
-                    affected_accounts.insert(approve.spender.to_string());
+                if let Some(approve) = &tx.approve {
+                    let from_account = normalize_account_id(&approve.from.to_string());
+                    affected_accounts.insert(from_account);
                 }
             },
-            "notify" => {
-                // ICRC-3通知事件处理
-                debug!("检测到通知事件，但ICRC-3实现尚未完成");
-            },
             _ => {
-                warn!("未知交易类型: {}, 跳过账户提取", tx.kind);
+                // 其他交易类型暂不处理
             }
         }
     }
+    
+    let affected_accounts_count = affected_accounts.len();
+    info!("共有 {} 个账户受到影响，需要重新计算余额", affected_accounts_count);
     
     debug!("找到 {} 个受影响的账户需要更新余额", affected_accounts.len());
     
@@ -314,7 +312,7 @@ pub async fn calculate_incremental_balances(
         }
         
         // 计算该账户的余额
-        match calculate_account_balance(&account, &tx_indices, tx_col, token_config, anomalies_col, balance_history_col).await {
+        match calculate_account_balance(&account, &tx_indices, tx_col, token_config, anomalies_col, daily_balance_col, config).await {
             Ok((balance, has_anomalies)) => {
                 // 更新余额记录
                 match save_account_balance(balances_col, &account, &balance).await {
@@ -341,6 +339,8 @@ pub async fn calculate_incremental_balances(
     info!("增量余额计算完成: 更新 {} 个账户, 失败 {} 个账户, 检测到 {} 个余额异常", 
           success_count, error_count, total_anomalies);
     
+    info!("📊 每日余额记录已同步更新完成 (受影响账户: {})", affected_accounts_count);
+    
     // 重新计算并保存总供应量
     supply::recalculate_total_supply(balances_col, supply_col).await?;
    
@@ -354,7 +354,8 @@ pub async fn calculate_account_balance(
     tx_col: &Collection<Document>,
     token_config: &crate::models::TokenConfig,
     anomalies_col: &Collection<Document>,
-    balance_history_col: &Collection<Document>,
+    daily_balance_col: &Collection<Document>,
+    config: &crate::models::Config,
 ) -> Result<(Nat, bool), Box<dyn Error>> {
     // 获取代币小数位数，默认为8
     let _token_decimals = token_config.decimals.unwrap_or(8);
@@ -364,6 +365,9 @@ pub async fn calculate_account_balance(
     let mut balance = Nat::from(0u64);
     let mut processed_count = 0u64;
     let mut has_anomalies = false;
+    
+    // 用于每日余额聚合的数据收集
+    let mut daily_transactions: std::collections::HashMap<String, Vec<(u64, Nat)>> = std::collections::HashMap::new();
     
     // 查询与该账户相关的所有交易
     let filter = doc! { 
@@ -443,7 +447,7 @@ pub async fn calculate_account_balance(
         // 记录变化前的余额
         let balance_before = balance.clone();
         let mut balance_changed = false;
-        let mut tx_type_for_history = String::new();
+        let mut _tx_type_for_history = String::new();
         
         // 根据交易类型和账户角色计算余额变化
         match tx.kind.as_str() {
@@ -466,7 +470,7 @@ pub async fn calculate_account_balance(
                     // 如果是发送方，减少余额
                     if is_from {
                         balance_changed = true;
-                        tx_type_for_history = "transfer_out".to_string();
+                        _tx_type_for_history = "transfer_out".to_string();
                         
                         // 先创建错误消息，避免借用冲突
                         let error_msg = format!("账户 {} 的余额不足，当前余额: {}, 转账金额: {}", 
@@ -507,7 +511,7 @@ pub async fn calculate_account_balance(
                     // 如果是接收方，增加余额
                     if is_to {
                         balance_changed = true;
-                        tx_type_for_history = "transfer_in".to_string();
+                        _tx_type_for_history = "transfer_in".to_string();
                         balance = balance + transfer.amount.clone();
                     }
                     
@@ -525,7 +529,7 @@ pub async fn calculate_account_balance(
                     // 如果是接收方，增加余额
                     if account_match(&to_account, &normalized_account) {
                         balance_changed = true;
-                        tx_type_for_history = "mint".to_string();
+                        _tx_type_for_history = "mint".to_string();
                         balance = balance + mint.amount.clone();
                     }
                 }
@@ -544,7 +548,7 @@ pub async fn calculate_account_balance(
                     // 如果是发送方，减少余额
                     if account_match(&from_account, &normalized_account) {
                         balance_changed = true;
-                        tx_type_for_history = "burn".to_string();
+                        _tx_type_for_history = "burn".to_string();
                         
                         let error_msg = format!("账户 {} 的余额不足，当前余额: {}, 销毁金额: {}", 
                                               normalized_account, balance.0, burn.amount.0);
@@ -578,7 +582,7 @@ pub async fn calculate_account_balance(
                         if let Some(ref fee) = approve.fee {
                             if !fee.0.is_zero() {
                                 balance_changed = true;
-                                tx_type_for_history = "approve_fee".to_string();
+                                _tx_type_for_history = "approve_fee".to_string();
                                 
                                 let fee_error_msg = format!("账户 {} 的余额不足以支付授权手续费，当前余额: {}, 手续费: {}", 
                                                          normalized_account, balance.0, fee.0);
@@ -607,19 +611,18 @@ pub async fn calculate_account_balance(
             }
         }
         
-        // 如果余额发生了变化，记录到余额历史
+        // 如果余额发生了变化，记录到每日余额聚合
         if balance_changed {
-            if let Err(e) = crate::db::balance_history::save_balance_history(
-                balance_history_col,
-                &normalized_account,
-                tx_index,
-                &tx_type_for_history,
-                &balance_before,
-                &balance,
-                tx.timestamp,
-            ).await {
-                error!("记录余额历史失败: {}", e);
-            }
+            debug!("账户 {} 余额发生变化: {} -> {}", normalized_account, balance_before.0, balance.0);
+            
+            // 获取交易日期
+            let date = crate::db::daily_balance::get_date_from_timestamp(tx.timestamp);
+            
+            // 收集每日交易数据
+            daily_transactions
+                .entry(date)
+                .or_insert_with(Vec::new)
+                .push((tx_index, balance.clone()));
         }
         
         processed_count += 1;
@@ -631,6 +634,38 @@ pub async fn calculate_account_balance(
            
     if has_anomalies {
         info!("账户 {} 在余额计算中检测到异常，已记录详细信息", normalized_account);
+    }
+    
+    // 处理每日余额聚合
+    let mut daily_balance_records_count = 0;
+    let mut daily_balance_days_count = 0;
+    
+    for (date, transactions) in daily_transactions {
+        if !transactions.is_empty() {
+            daily_balance_days_count += 1;
+            daily_balance_records_count += transactions.len();
+            
+            let transactions_ref: Vec<(u64, &Nat)> = transactions.iter()
+                .map(|(idx, balance)| (*idx, balance))
+                .collect();
+            
+            if let Err(e) = crate::db::daily_balance::update_daily_balance_record(
+                daily_balance_col,
+                config,
+                &normalized_account,
+                &date,
+                &transactions_ref,
+            ).await {
+                error!("更新账户 {} 日期 {} 的每日余额记录失败: {}", normalized_account, date, e);
+            } else {
+                debug!("已更新账户 {} 日期 {} 的每日余额记录", normalized_account, date);
+            }
+        }
+    }
+    
+    if daily_balance_days_count > 0 {
+        info!("📊 账户 {} 的每日余额记录已更新: {} 天，共 {} 笔交易", 
+               normalized_account, daily_balance_days_count, daily_balance_records_count);
     }
     
     Ok((balance, has_anomalies))

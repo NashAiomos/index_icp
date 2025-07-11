@@ -43,3 +43,12 @@ enabled = true
 port = 6017
 # 是否启用CORS支持
 cors_enabled = true
+
+# 每日余额聚合配置
+[daily_balance]
+# 是否启用每日余额聚合功能
+enabled = true
+# 时区偏移小时数（默认0表示UTC）
+timezone_offset = 0
+
+
