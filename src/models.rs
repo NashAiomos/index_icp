@@ -227,7 +227,7 @@ pub struct Config {
     pub tokens: Vec<TokenConfig>,  // 多代币配置
     pub log: Option<LogConfig>,    // 日志配置
     pub api_server: Option<ApiServerConfig>, // API服务器配置
-    pub balance_history: Option<BalanceHistoryConfig>, // 余额历史记录配置
+    pub daily_balance: Option<DailyBalanceConfig>, // 每日余额聚合配置
 }
 
 // API服务器配置结构体
@@ -239,11 +239,7 @@ pub struct ApiServerConfig {
     pub cors_enabled: bool,  // 是否启用CORS
 }
 
-// 余额历史记录配置结构体
-#[derive(Debug, Deserialize, Clone)]
-pub struct BalanceHistoryConfig {
-    pub enabled: bool,       // 是否启用余额历史记录功能
-}
+
 
 // 命令行参数结构体
 #[derive(Debug, Clone)]
@@ -285,40 +281,58 @@ pub struct BalanceAnomaly {
     pub timestamp: i64,
 }
 
-/// 账户余额变化记录
+/// 每日余额聚合记录
+/// 记录每个账户每天的余额变化汇总信息
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct BalanceHistory {
+pub struct DailyBalanceRecord {
     /// 账户ID（规范化后的格式）
     pub account: String,
-    /// 交易索引
-    pub tx_index: u64,
-    /// 交易类型（transfer/mint/burn/approve_fee等）
-    pub tx_type: String,
-    /// 变化前的余额
-    pub balance_before: String,
-    /// 变化后的余额
-    pub balance_after: String,
-    /// 余额变化量（正数表示增加，负数表示减少）
-    pub balance_change: String,
-    /// 交易时间戳
-    pub timestamp: u64,
-    /// 记录创建时间
+    /// 日期字符串，格式：YYYY-MM-DD（UTC时区）
+    pub date: String,
+    /// 这一天的最高余额
+    pub max_balance: String,
+    /// 这一天的最低余额
+    pub min_balance: String,
+    /// 这一天结束时的余额
+    pub end_balance: String,
+    /// 余额最多的交易是否在余额最少的交易之前
+    pub max_before_min: bool,
+    /// 这一天包含的交易索引列表
+    pub transaction_indices: Vec<u64>,
+    /// 这一天包含的交易总数
+    pub transaction_count: u32,
+    /// 记录创建时间（Unix时间戳）
     pub created_at: i64,
+    /// 记录更新时间（Unix时间戳）
+    pub updated_at: i64,
 }
 
-/// 余额历史查询参数
+/// 每日余额查询参数
 #[derive(Debug, Deserialize, Clone)]
-pub struct BalanceHistoryQuery {
+pub struct DailyBalanceQuery {
     /// 要查询的代币符号（可选，默认使用配置的第一个代币）
     pub token: Option<String>,
-    /// 开始时间戳（可选）
-    pub start_time: Option<u64>,
-    /// 结束时间戳（可选）
-    pub end_time: Option<u64>,
+    /// 开始日期，格式：YYYY-MM-DD（可选）
+    pub start_date: Option<String>,
+    /// 结束日期，格式：YYYY-MM-DD（可选）
+    pub end_date: Option<String>,
     /// 返回结果的最大条目数（可选，默认100）
     pub limit: Option<i64>,
     /// 跳过的条目数，用于分页（可选，默认0）
     pub skip: Option<i64>,
-    /// 排序方式（asc/desc，默认desc按时间倒序）
+    /// 排序方式（asc/desc，默认desc按日期倒序）
     pub sort: Option<String>,
 }
+
+/// 每日余额配置
+#[derive(Debug, Deserialize, Clone)]
+pub struct DailyBalanceConfig {
+    /// 是否启用每日余额聚合功能
+    pub enabled: bool,
+    /// 时区偏移小时数（默认0表示UTC）
+    pub timezone_offset: Option<i32>,
+}
+
+
+
+

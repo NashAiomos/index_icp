@@ -177,7 +177,7 @@ pub async fn calculate_all_balances(
         &collections.balances_col,
         &collections.total_supply_col,
         &collections.balance_anomalies_col,
-        &collections.balance_history_col,
+        &collections.daily_balance_col,
         token_config,
         config
     ).await {

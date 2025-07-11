@@ -423,7 +423,7 @@ async fn run_application(cfg: models::Config) -> Result<(), Box<dyn Error>> {
                 &collections.balances_col,
                 &collections.total_supply_col,
                 &collections.balance_anomalies_col,
-                &collections.balance_history_col,
+                &collections.daily_balance_col,
                 &token,
                 &cfg
             ).await {
@@ -624,7 +624,7 @@ async fn run_application(cfg: models::Config) -> Result<(), Box<dyn Error>> {
                                 &collections.balances_col,
                                 &collections.total_supply_col,
                                 &collections.balance_anomalies_col,
-                                &collections.balance_history_col,
+                                &collections.daily_balance_col,
                                 &token,
                                 &cfg
                             ).await {
@@ -674,7 +674,7 @@ async fn run_application(cfg: models::Config) -> Result<(), Box<dyn Error>> {
                             &collections.balances_col,
                             &collections.total_supply_col,
                             &collections.balance_anomalies_col,
-                            &collections.balance_history_col,
+                            &collections.daily_balance_col,
                             &token,
                             &cfg
                         ).await {

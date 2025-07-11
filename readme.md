@@ -6,7 +6,7 @@
 
 - 同步区块链交易数据
 - 计算账户余额
-- 记录余额变化历史，支持精确的余额变化追踪
+- 记录每日余额聚合数据，支持余额趋势分析和历史查询
 - 提供 RESTful API 接口查询交易和账户信息
 - 支持增量同步和全量重置
 - 支持归档数据同步
@@ -29,7 +29,7 @@ src/
 │   ├── transactions.rs    # 交易数据库操作
 │   ├── accounts.rs        # 账户数据库操作
 │   ├── balances.rs        # 余额数据库操作
-│   ├── balance_history.rs # 余额历史数据库操作
+│   ├── daily_balance.rs   # 每日余额聚合数据库操作
 │   ├── supply.rs          # 总供应量数据库操作
 │   └── sync_status.rs     # 同步状态数据库操作
 └── sync/                  # 同步功能
@@ -50,7 +50,7 @@ backend 是主生产分支；index_multiple_tokens 是同步多个代币分支�
 3. **balances**: 存储每个账户的最新余额信息
 4. **total_supply**: 记录代币的总供应量
 5. **balance_anomalies**: 记录余额计算过程中的异常情况
-6. **balance_history**: 记录每个账户的余额变化历史
+6. **daily_balance**: 记录每个账户的每日余额聚合数据（按UTC时区）
 
 此外，系统还维护一个全局集合：
 
@@ -139,6 +139,13 @@ enabled = true
 port = 6017
 # 是否启用CORS支持
 cors_enabled = true
+
+# 每日余额聚合配置
+[daily_balance]
+# 是否启用每日余额聚合功能
+enabled = true
+# 时区偏移量（小时），UTC时区为0
+timezone_offset = 0
 ```
 
 ## 功能特性
@@ -163,14 +170,16 @@ cors_enabled = true
    
    针对每笔交易，程序会实时更新相关账户的余额状态，支持转账、铸币、销毁和授权等操作。
 
-6. **余额变化历史记录**
+6. **每日余额聚合**
    
-   程序在计算余额时会自动记录每笔交易对账户余额的影响，包括：
-   - 交易前后的余额数值
-   - 余额变化量（带正负号）
-   - 交易类型和时间戳
+   程序在计算余额时会自动记录每个账户的每日余额聚合数据，包括：
+   - 按UTC时区进行日期分组
+   - 每日最大余额、最小余额、日末余额
+   - 最大余额是否在最小余额之前发生
+   - 每日交易索引列表和统计信息
+   - 只记录有余额变化的日期，优化存储空间
    - 支持时间范围查询和分页浏览
-   - 可用于绘制精确的余额变化图表
+   - 可用于绘制账户余额趋势图表
 
 7. **定时增量同步**
    
@@ -183,6 +192,43 @@ cors_enabled = true
 9. **完善的日志记录**
    
    支持多级别、多目标的日志记录，方便监控和问题排查。控制台仅显示重要信息，详细日志保存到文件。
+
+## 每日余额聚合功能详解
+
+### 设计目标
+
+原有的余额历史记录功能会为每笔交易记录一条余额变化记录，在高频交易场景下会产生大量数据。每日余额聚合功能通过按日期分组的方式，显著减少存储需求的同时提供更有用的历史数据分析。
+
+### 技术特点
+
+1. **UTC时区标准化**
+   - 统一使用UTC时区进行日期计算
+   - 避免时区转换带来的数据混乱
+   - 配置文件支持时区偏移设置
+
+2. **智能存储策略**
+   - 仅记录有余额变化的日期
+   - 避免产生大量的零变化记录
+   - 优化存储空间和查询性能
+
+3. **丰富的聚合数据**
+   - 每日最大余额和最小余额
+   - 日末余额（当日最后一笔交易后的余额）
+   - 最大余额是否发生在最小余额之前的时序信息
+   - 完整的交易索引列表和统计计数
+
+4. **实时更新机制**
+   - 在余额计算过程中自动更新每日记录
+   - 支持同一天内多次余额变化的聚合
+   - 保持数据的实时性和准确性
+
+### 应用场景
+
+- 绘制账户余额趋势图表
+- 分析账户的历史余额波动
+- 统计账户的交易活跃度
+- 识别账户的资金流入流出模式
+- 支持按日期范围的余额查询和分析
 
 ## 管理员功能
 
@@ -392,20 +438,20 @@ cors_enabled = true
   }
   ```
 
-#### GET /api/balance_history/{account}
+#### GET /api/daily_balance/{account}
 - 路径参数：
   - `account` (String)：账户标识，格式 `owner` 或 `owner:subaccount`
 - 查询参数（可选）：
   - `token` (String)：代币符号，默认为配置的第一个代币
-  - `start_time` (u64)：开始时间戳（纳秒）
-  - `end_time` (u64)：结束时间戳（纳秒）
+  - `start_date` (String)：开始日期，格式 `YYYY-MM-DD`
+  - `end_date` (String)：结束日期，格式 `YYYY-MM-DD`
   - `limit` (i64)：返回记录数量，默认 `100`
   - `skip` (i64)：跳过记录数，用于分页，默认 `0`
   - `sort` (String)：排序方式，`asc` 或 `desc`，默认 `desc`
-- 描述：查询指定账户的余额变化历史记录，包括每笔交易对余额的影响、交易时间和类型
+- 描述：查询指定账户的每日余额聚合记录，包括每日最大、最小、结束余额和交易统计信息
 - 示例请求：
   ```
-  GET /api/balance_history/ryjl3-tyaaa-aaaaa-aaaba-cai?limit=10&token=VUSD
+  GET /api/daily_balance/ryjl3-tyaaa-aaaaa-aaaba-cai?limit=10&token=VUSD&start_date=2023-11-01&end_date=2023-11-30
   ```
 - 示例响应：
   ```json
@@ -415,17 +461,18 @@ cors_enabled = true
       "account": "ryjl3-tyaaa-aaaaa-aaaba-cai",
       "token": "VUSD",
       "total": 10,
-      "history": [
+      "daily_records": [
         {
           "account": "ryjl3-tyaaa-aaaaa-aaaba-cai",
-          "tx_index": 12345,
-          "tx_type": "transfer_in",
-          "balance_before": "1000000000",
-          "balance_after": "1500000000",
-          "balance_change": "+500000000",
-          "timestamp": 1700050000,
-          "datetime": "2023-11-15T12:00:00Z",
-          "created_at": 1700050001,
+          "date": "2023-11-15",
+          "max_balance": "1500000000",
+          "min_balance": "1000000000",
+          "end_balance": "1500000000",
+          "max_before_min": true,
+          "transaction_indices": [12345, 12346, 12347],
+          "transaction_count": 3,
+          "created_at": 1700050000,
+          "updated_at": 1700050001,
           "token": "VUSD",
           "token_name": "VUSD",
           "decimals": 8
@@ -436,15 +483,15 @@ cors_enabled = true
   }
   ```
 
-#### GET /api/balance_stats/{account}
+#### GET /api/daily_balance_stats/{account}
 - 路径参数：
   - `account` (String)：账户标识，格式 `owner` 或 `owner:subaccount`
 - 查询参数（可选）：
   - `token` (String)：代币符号，默认为配置的第一个代币
-- 描述：查询指定账户的余额历史统计信息，包括总记录数、时间范围、初始和当前余额
+- 描述：查询指定账户的每日余额聚合统计信息，包括总记录数、时间范围、余额统计等
 - 示例请求：
   ```
-  GET /api/balance_stats/ryjl3-tyaaa-aaaaa-aaaba-cai?token=VUSD
+  GET /api/daily_balance_stats/ryjl3-tyaaa-aaaaa-aaaba-cai?token=VUSD
   ```
 - 示例响应：
   ```json
@@ -455,10 +502,12 @@ cors_enabled = true
       "token": "VUSD",
       "token_name": "VUSD",
       "decimals": 8,
-      "total_records": 156,
-      "first_record_time": 1699000000,
-      "last_record_time": 1700100000,
-      "initial_balance": "0",
+      "total_records": 45,
+      "first_record_date": "2023-10-01",
+      "last_record_date": "2023-11-30",
+      "total_transaction_count": 156,
+      "highest_balance": "2000000000",
+      "lowest_balance": "100000000",
       "current_balance": "1500000000"
     },
     "error": null

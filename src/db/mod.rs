@@ -29,7 +29,7 @@ pub mod accounts;
 pub mod balances;
 pub mod sync_status;
 pub mod supply;
-pub mod balance_history;
+pub mod daily_balance;
 
 #[derive(Clone)]
 /// 数据库连接信息
@@ -64,7 +64,7 @@ pub struct TokenCollections {
     pub balances_col: Collection<Document>,
     pub total_supply_col: Collection<Document>,
     pub balance_anomalies_col: Collection<Document>,
-    pub balance_history_col: Collection<Document>,
+    pub daily_balance_col: Collection<Document>,
 }
 
 /// 初始化MongoDB连接
@@ -97,7 +97,7 @@ pub async fn init_db(mongodb_url: &str, database_name: &str, tokens: &[TokenConf
         let balances_col: Collection<Document> = db.collection(&format!("{}_balances", prefix));
         let total_supply_col: Collection<Document> = db.collection(&format!("{}_total_supply", prefix));
         let balance_anomalies_col: Collection<Document> = db.collection(&format!("{}_balance_anomalies", prefix));
-        let balance_history_col: Collection<Document> = db.collection(&format!("{}_balance_history", prefix));
+        let daily_balance_col: Collection<Document> = db.collection(&format!("{}_daily_balance", prefix));
         
         let token_collections = TokenCollections {
             symbol: token.symbol.clone(),
@@ -106,7 +106,7 @@ pub async fn init_db(mongodb_url: &str, database_name: &str, tokens: &[TokenConf
             balances_col,
             total_supply_col,
             balance_anomalies_col,
-            balance_history_col,
+            daily_balance_col,
         };
         
         collections.insert(token.symbol.clone(), token_collections);
@@ -163,10 +163,12 @@ pub async fn create_indexes(conn: &DbConnection, config: &crate::models::Config)
             Err(e) => error!("{}: 余额索引创建失败: {}", symbol, e)
         }
         
-        // 余额历史索引
-        if let Err(e) = crate::db::balance_history::create_balance_history_indexes(&collections.balance_history_col, config).await {
-            error!("{}: 余额历史索引创建失败: {}", symbol, e);
+        // 每日余额索引
+        if let Err(e) = crate::db::daily_balance::create_daily_balance_indexes(&collections.daily_balance_col, config).await {
+            error!("{}: 每日余额索引创建失败: {}", symbol, e);
         }
+        
+
     }
     
     // 同步状态索引
